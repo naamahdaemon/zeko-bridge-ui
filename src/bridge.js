@@ -1,7 +1,19 @@
-import { Bridge } from "@zeko-labs/bridge-sdk";
+import { Bridge, diagnoseBridgeHistory } from "@zeko-labs/bridge-sdk";
 import { PublicKey, UInt32, UInt64 } from "o1js";
 
 const MINA = 1e9;
+const BRIDGE_CONFIG = {
+  l1Url: "https://api.minascan.io/node/devnet/v1/graphql",
+  l1ArchiveUrl: "https://api.minascan.io/archive/devnet/v1/graphql",
+  actionsApi: "https://api.actions.zeko.io/graphql",
+  zekoUrl: "https://testnet.zeko.io/graphql",
+  zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql",
+  l1Network: "testnet",
+  l2Network: "testnet",
+  pollTimeout: 1_200_000
+};
+const DIAGNOSTICS_CACHE_TTL_MS = 60000;
+const depositDiagnosticsCache = new Map();
 
 function toNano(amount) {
   const value = Number(amount);
@@ -67,17 +79,35 @@ function dedupeWithdrawals(withdrawals) {
   return [...deduped.values()];
 }
 
-export async function initBridge() {
-  return await Bridge.init({
-    l1Url: "https://api.minascan.io/node/devnet/v1/graphql",
-    l1ArchiveUrl: "https://api.minascan.io/archive/devnet/v1/graphql",
-    actionsApi: "https://api.actions.zeko.io/graphql",
-    zekoUrl: "https://testnet.zeko.io/graphql",
-    zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql",
-    l1Network: "testnet",
-    l2Network: "testnet",
-    pollTimeout: 1_200_000
+async function getDepositTimestampFallbacks(account) {
+  const walletAddress = toComparableString(account);
+  const cached = depositDiagnosticsCache.get(walletAddress);
+
+  if (cached && Date.now() - cached.fetchedAt < DIAGNOSTICS_CACHE_TTL_MS) {
+    return cached.timestampsByHash;
+  }
+
+  const diagnostics = await diagnoseBridgeHistory({
+    config: BRIDGE_CONFIG,
+    walletAddress
   });
+
+  const timestampsByHash = new Map(
+    (diagnostics?.deposits?.entries ?? [])
+      .filter((entry) => entry?.hash && timestampWeight(entry?.timestamp) > 0)
+      .map((entry) => [entry.hash, entry.timestamp])
+  );
+
+  depositDiagnosticsCache.set(walletAddress, {
+    fetchedAt: Date.now(),
+    timestampsByHash
+  });
+
+  return timestampsByHash;
+}
+
+export async function initBridge() {
+  return await Bridge.init(BRIDGE_CONFIG);
 }
 
 export async function submitDepositTx(bridge, account, amount, fee) {
@@ -115,7 +145,29 @@ export async function submitWithdrawalTx(bridge, account, amount, fee) {
 
 export async function fetchDepositStates(bridge, account) {
   if (!bridge) throw new Error("Bridge is not initialized.");
-  return await bridge.fetchDepositsWithStates(toPublicKey(account));
+  const state = await bridge.fetchDepositsWithStates(toPublicKey(account));
+  const deposits = state?.deposits ?? [];
+
+  if (!deposits.some((deposit) => timestampWeight(deposit?.timestamp) === 0 && deposit?.hash)) {
+    return state;
+  }
+
+  try {
+    const timestampsByHash = await getDepositTimestampFallbacks(account);
+
+    return {
+      ...state,
+      deposits: deposits.map((deposit) => ({
+        ...deposit,
+        timestamp:
+          timestampWeight(deposit?.timestamp) > 0
+            ? deposit.timestamp
+            : timestampsByHash.get(deposit.hash) ?? deposit.timestamp
+      }))
+    };
+  } catch {
+    return state;
+  }
 }
 
 export async function fetchWithdrawalStates(bridge, account) {

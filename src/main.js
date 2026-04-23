@@ -14,6 +14,9 @@ import {
 
 const STORAGE_KEY = "zeko-bridge-ui:v2";
 const POLL_INTERVAL_MS = 15000;
+const SLOT_DURATION_MS = 180000;
+const L1_NETWORK_ID = "mina:devnet";
+const L2_NETWORK_ID = "zeko:testnet";
 
 const els = {
   connect: document.getElementById("connect"),
@@ -198,6 +201,73 @@ function formatChainTimestamp(value) {
   return formatDateTime(normalized);
 }
 
+function getBridgeDelayMs() {
+  const slots = Number(bridge?.withdrawalDelay?.toString?.() ?? bridge?.withdrawalDelay ?? 0);
+  if (!Number.isFinite(slots) || slots <= 0) return null;
+  return slots * SLOT_DURATION_MS;
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "less than a minute";
+
+  const totalMinutes = Math.round(ms / 60000);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+function formatEta(targetMs) {
+  if (!Number.isFinite(targetMs)) return "-";
+
+  const delta = targetMs - Date.now();
+  if (delta <= 0) return "now";
+
+  return `${formatDuration(delta)} remaining`;
+}
+
+function estimateWithdrawalLabel(withdrawal) {
+  if (withdrawal.finalised) return "Finalized";
+  if (withdrawal.committed) return "Ready to finalize";
+
+  const delayMs = getBridgeDelayMs();
+  const timestampMs = normalizeTimestampMs(withdrawal.timestamp);
+
+  if (delayMs != null && timestampMs != null) {
+    const targetMs = timestampMs + delayMs;
+    return `Likely finalizable around ${formatDateTime(targetMs)} (${formatEta(targetMs)})`;
+  }
+
+  return "Waiting for bridge commit";
+}
+
+function estimateDepositLabel(deposit) {
+  if (deposit.finalised) return "Claimed";
+  if (deposit.cancelled) return "Canceled";
+  if (deposit.confirmed) return "Ready to claim";
+
+  const delayMs = getBridgeDelayMs();
+  const timestampMs = normalizeTimestampMs(deposit.timestamp);
+
+  if (!deposit.accepted && delayMs != null && timestampMs != null) {
+    const targetMs = timestampMs + delayMs;
+    return `Likely accepted around ${formatDateTime(targetMs)} (${formatEta(targetMs)})`;
+  }
+
+  if (deposit.accepted && !deposit.confirmed) {
+    return "Accepted, waiting for synchronization";
+  }
+
+  if (!deposit.synced) {
+    return "Waiting to sync into the bridge queue";
+  }
+
+  return "Waiting for bridge confirmation";
+}
+
 function renderTopStatus() {
   els.account.textContent = account || "Not connected";
   els.connectionStatus.textContent = account ? "Wallet connected" : "Wallet disconnected";
@@ -334,6 +404,7 @@ function renderDepositQueue() {
             <div><strong>Timeout:</strong> ${timeout}</div>
               <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
             <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
+            <div><strong>Estimate:</strong> ${estimateDepositLabel(d)}</div>
           </div>
 
           <div class="queue-badges">
@@ -405,6 +476,7 @@ function renderWithdrawalQueue() {
             <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
               <div><strong>Hash:</strong> ${renderHashValue(w.hash)}</div>
             <div><strong>Timestamp:</strong> ${formatChainTimestamp(w.timestamp)}</div>
+            <div><strong>Estimate:</strong> ${estimateWithdrawalLabel(w)}</div>
           </div>
 
           <div class="queue-badges">
@@ -568,7 +640,9 @@ els.deposit.addEventListener("click", async () => {
     const tx = await submitDepositTx(bridge, account, amount, fee);
 
     log("Sending deposit transaction...");
-    const result = await sendTransaction(tx, fee, "zeko-deposit");
+    const result = await sendTransaction(tx, fee, "zeko-deposit", {
+      requiredNetwork: L1_NETWORK_ID
+    });
 
     const hash =
       result?.hash ||
@@ -619,7 +693,9 @@ els.withdraw.addEventListener("click", async () => {
     const tx = await submitWithdrawalTx(bridge, account, amount, fee);
 
     log("Sending withdrawal transaction...");
-    const result = await sendTransaction(tx, fee, "zeko-withdraw");
+    const result = await sendTransaction(tx, fee, "zeko-withdraw", {
+      requiredNetwork: L2_NETWORK_ID
+    });
 
     const hash =
       result?.hash ||
@@ -682,7 +758,9 @@ els.claimNextDeposit.addEventListener("click", async () => {
     });
 
     const tx = await buildFinalizeDepositTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-finalize-deposit");
+    const result = await sendTransaction(tx, fee, "zeko-finalize-deposit", {
+      requiredNetwork: L2_NETWORK_ID
+    });
 
     const hash =
       result?.hash ||
@@ -757,7 +835,9 @@ els.cancelNextDeposit.addEventListener("click", async () => {
     });
 
     const tx = await buildCancelDepositTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-cancel-deposit");
+    const result = await sendTransaction(tx, fee, "zeko-cancel-deposit", {
+      requiredNetwork: L1_NETWORK_ID
+    });
 
     const hash =
       result?.hash ||
@@ -832,7 +912,9 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
     });
 
     const tx = await buildFinalizeWithdrawalTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-finalize-withdrawal");
+    const result = await sendTransaction(tx, fee, "zeko-finalize-withdrawal", {
+      requiredNetwork: L1_NETWORK_ID
+    });
 
     const hash =
       result?.hash ||
