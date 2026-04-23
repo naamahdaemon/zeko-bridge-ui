@@ -1,7 +1,10 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: './',
+  base: '/zeko-bridge-ui/',
+  build: {
+    outDir: 'docs',
+  },
   server: {
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
