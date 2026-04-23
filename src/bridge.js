@@ -23,6 +23,50 @@ function toPublicKey(value) {
   return typeof value === "string" ? PublicKey.fromBase58(value) : value;
 }
 
+function toComparableString(value) {
+  if (value === null || value === undefined) return "";
+  return value.toBase58?.() ?? value.toString?.() ?? String(value);
+}
+
+function timestampWeight(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function pickPreferredWithdrawal(current, candidate) {
+  const currentScore =
+    (current.finalised ? 4 : 0) +
+    (current.committed ? 2 : 0) +
+    (timestampWeight(current.timestamp) > 0 ? 1 : 0);
+  const candidateScore =
+    (candidate.finalised ? 4 : 0) +
+    (candidate.committed ? 2 : 0) +
+    (timestampWeight(candidate.timestamp) > 0 ? 1 : 0);
+
+  if (candidateScore !== currentScore) {
+    return candidateScore > currentScore ? candidate : current;
+  }
+
+  return timestampWeight(candidate.timestamp) > timestampWeight(current.timestamp) ? candidate : current;
+}
+
+function dedupeWithdrawals(withdrawals) {
+  const deduped = new Map();
+
+  for (const withdrawal of withdrawals ?? []) {
+    const key = [
+      toComparableString(withdrawal.hash),
+      toComparableString(withdrawal.recipient),
+      toComparableString(withdrawal.amount)
+    ].join("|");
+
+    const current = deduped.get(key);
+    deduped.set(key, current ? pickPreferredWithdrawal(current, withdrawal) : withdrawal);
+  }
+
+  return [...deduped.values()];
+}
+
 export async function initBridge() {
   return await Bridge.init({
     l1Url: "https://api.minascan.io/node/devnet/v1/graphql",
@@ -76,7 +120,12 @@ export async function fetchDepositStates(bridge, account) {
 
 export async function fetchWithdrawalStates(bridge, account) {
   if (!bridge) throw new Error("Bridge is not initialized.");
-  return await bridge.fetchWithdrawalsWithStates(toPublicKey(account));
+  const state = await bridge.fetchWithdrawalsWithStates(toPublicKey(account));
+
+  return {
+    ...state,
+    withdrawals: dedupeWithdrawals(state?.withdrawals)
+  };
 }
 
 export async function getDepositCapabilities(bridge, account) {

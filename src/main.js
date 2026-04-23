@@ -178,6 +178,26 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function normalizeTimestampMs(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const raw = typeof value === "string" ? value.trim() : value;
+  if (raw === "" || raw === "0" || raw === 0) return null;
+
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  if (numeric < 1e10) return numeric * 1000;
+  if (numeric < 1e12) return numeric * 10;
+  return numeric;
+}
+
+function formatChainTimestamp(value) {
+  const normalized = normalizeTimestampMs(value);
+  if (normalized == null) return "-";
+  return formatDateTime(normalized);
+}
+
 function renderTopStatus() {
   els.account.textContent = account || "Not connected";
   els.connectionStatus.textContent = account ? "Wallet connected" : "Wallet disconnected";
@@ -313,7 +333,7 @@ function renderDepositQueue() {
             <div><strong>Holder:</strong> ${shortPk(holder)}</div>
             <div><strong>Timeout:</strong> ${timeout}</div>
               <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
-            <div><strong>Timestamp:</strong> ${safeText(d.timestamp)}</div>
+            <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
           </div>
 
           <div class="queue-badges">
@@ -384,7 +404,7 @@ function renderWithdrawalQueue() {
             <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
             <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
               <div><strong>Hash:</strong> ${renderHashValue(w.hash)}</div>
-            <div><strong>Timestamp:</strong> ${safeText(w.timestamp)}</div>
+            <div><strong>Timestamp:</strong> ${formatChainTimestamp(w.timestamp)}</div>
           </div>
 
           <div class="queue-badges">
