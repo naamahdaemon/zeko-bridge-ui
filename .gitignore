@@ -1,0 +1,3 @@
+.gitattributes
+*.bak
+/node_modules

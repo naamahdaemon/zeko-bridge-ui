@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zeko Bridge UI</title>
+    <script type="module" crossorigin src="/assets/index-CDTVR_ii.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D4hyB4wO.css">
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero card">
+        <div class="hero-copy">
+          <span class="eyebrow">Mina <span class="muted-arrow">to</span> Zeko testnet bridge</span>
+          <h1>Zeko Bridge UI</h1>
+          <p class="hero-text">
+            A clearer control panel to move funds, track bridge progress, and handle the next claim, cancel, or finalize step for your connected wallet.
+          </p>
+        </div>
+
+        <div class="hero-status">
+          <div class="status-pill" id="connectionStatus">Wallet disconnected</div>
+          <div class="status-meta">
+            <div class="meta-label">Connected account</div>
+            <div id="account" class="meta-value">Not connected</div>
+          </div>
+          <button id="connect" class="primary-button">Connect wallet</button>
+        </div>
+      </header>
+
+      <section class="grid two-up">
+        <div class="card">
+          <div class="section-heading">
+            <div>
+              <h2>New transfer</h2>
+              <p class="section-text">Choose an amount and submit a bridge action from this wallet.</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              Amount
+              <span class="field-help">How much MINA to bridge</span>
+              <input id="amount" type="number" min="0" step="0.000000001" value="1" />
+            </label>
+
+            <label>
+              Fee
+              <span class="field-help">Wallet fee paid on submission</span>
+              <input id="fee" type="number" min="0" step="0.000000001" value="0.1" />
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="deposit" class="primary-button">Deposit to Zeko</button>
+            <button id="withdraw">Withdraw to Mina</button>
+          </div>
+
+          <div class="info-callout">
+            Deposits move funds from Mina to Zeko. Withdrawals move funds from Zeko back to Mina.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-heading">
+            <div>
+              <h2>Live sync</h2>
+              <p class="section-text">Refresh queue state now or keep this page synced automatically.</p>
+            </div>
+          </div>
+
+          <div class="stats-strip">
+            <div class="mini-stat">
+              <span class="mini-stat-label">Polling</span>
+              <strong id="pollingStatus">Stopped</strong>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-stat-label">Last refresh</span>
+              <strong id="lastRefresh">Never</strong>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="refreshState">Refresh state</button>
+            <button id="startPolling">Start auto-refresh</button>
+            <button id="stopPolling">Stop auto-refresh</button>
+          </div>
+
+          <p class="hint">
+            Important: the SDK acts on the <strong>next eligible</strong> queue item for the connected wallet. You cannot target an arbitrary deposit by hash from this UI.
+          </p>
+        </div>
+      </section>
+
+      <section class="grid action-grid">
+        <div class="card action-card">
+          <div class="section-heading">
+            <div>
+              <h2>Deposit follow-up</h2>
+              <p class="section-text">See what can be claimed or cancelled next for this wallet.</p>
+            </div>
+          </div>
+
+          <div class="detail-stack">
+            <div class="detail-row">
+              <span class="detail-label">Next claimable deposit</span>
+              <strong id="nextClaimableDeposit">-</strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Next cancellable deposit</span>
+              <strong id="nextCancellableDeposit">-</strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Availability reason</span>
+              <strong id="depositGlobalReason">-</strong>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="claimNextDeposit" disabled>Claim next eligible deposit</button>
+            <button id="cancelNextDeposit" disabled>Cancel next eligible deposit</button>
+          </div>
+        </div>
+
+        <div class="card action-card">
+          <div class="section-heading">
+            <div>
+              <h2>Withdrawal follow-up</h2>
+              <p class="section-text">Finalize the next withdrawal that has become eligible.</p>
+            </div>
+          </div>
+
+          <div class="detail-stack">
+            <div class="detail-row">
+              <span class="detail-label">Next finalizable withdrawal</span>
+              <strong id="nextFinalizableWithdrawal">-</strong>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Availability reason</span>
+              <strong id="withdrawalGlobalReason">-</strong>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="finalizeNextWithdrawal" disabled>Finalize next eligible withdrawal</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <h2>Deposit queue</h2>
+            <p class="section-text">Track deposits for the connected wallet, including acceptance and confirmation progress.</p>
+          </div>
+        </div>
+        <div id="depositSummary" class="summary-grid"></div>
+        <div id="depositQueue" class="queue-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="section-heading">
+          <div>
+            <h2>Withdrawal queue</h2>
+            <p class="section-text">Track withdrawal commitments and finalizations for the connected wallet.</p>
+          </div>
+        </div>
+        <div id="withdrawalSummary" class="summary-grid"></div>
+        <div id="withdrawalQueue" class="queue-list"></div>
+      </section>
+
+      <section class="grid two-up lower-grid">
+        <div class="card">
+          <div class="section-heading">
+            <div>
+              <h2>Local history</h2>
+              <p class="section-text">Transactions submitted from this browser session are kept here for quick reference.</p>
+            </div>
+            <button id="clearHistory" class="ghost-button">Clear history</button>
+          </div>
+          <div id="localHistory" class="queue-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-heading">
+            <div>
+              <h2>Activity log</h2>
+              <p class="section-text">Useful for wallet actions, refreshes, and bridge errors.</p>
+            </div>
+          </div>
+          <pre id="log"></pre>
+        </div>
+      </section>
+    </div>
+
+  </body>
+</html>
