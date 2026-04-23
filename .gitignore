@@ -1,3 +1,4 @@
 .gitattributes
 *.bak
 /node_modules
+docs/CNAME
