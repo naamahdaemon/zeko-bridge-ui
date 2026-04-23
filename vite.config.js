@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: '/zeko-bridge-ui/',
+  base: './',
   build: {
     outDir: 'docs',
   },
