@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta id="viewportMeta" name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Zeko Bridge UI</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -10,12 +10,14 @@
     <div class="app">
       <header class="hero card">
         <div class="hero-copy">
-          <div class="hero-toolbar">
-            <button id="toggleDesktopMode" class="ghost-button subtle-button" type="button" aria-pressed="false">
-              Desktop mode off
-            </button>
+          <div class="hero-topline">
+            <span class="eyebrow">Mina <span class="muted-arrow">to</span> Zeko testnet bridge</span>
+            <div class="hero-toolbar">
+              <button id="toggleDesktopMode" class="ghost-button subtle-button" type="button" aria-pressed="false">
+                Desktop mode off
+              </button>
+            </div>
           </div>
-          <span class="eyebrow">Mina <span class="muted-arrow">to</span> Zeko testnet bridge</span>
           <h1>Zeko Bridge UI</h1>
           <p class="hero-text">
             A clearer control panel to move funds, track bridge progress, and handle the next claim, cancel, or finalize step for your connected wallet.

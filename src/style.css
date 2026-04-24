@@ -46,6 +46,10 @@ body.force-desktop .app {
   min-width: 1180px;
 }
 
+body.force-desktop.card-focus-mode .app {
+  min-width: 0;
+}
+
 .grid {
   display: grid;
   gap: 18px;
@@ -80,13 +84,17 @@ body.force-desktop .app {
 
 .hero-copy {
   position: relative;
-  padding-right: 172px;
+}
+
+.hero-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
 }
 
 .hero-toolbar {
-  position: absolute;
-  top: 0;
-  right: 0;
   display: flex;
   align-items: center;
 }
@@ -567,13 +575,7 @@ pre {
   }
 
   body:not(.force-desktop) .hero-toolbar {
-    position: static;
     justify-content: flex-start;
-    margin-bottom: 10px;
-  }
-
-  body:not(.force-desktop) .hero-copy {
-    padding-right: 0;
   }
 
   body.card-focus-mode .card.is-fullscreen {
@@ -629,9 +631,8 @@ pre {
     padding-right: 0;
   }
 
-  body.card-focus-mode .card.is-fullscreen .hero-toolbar {
-    position: static;
-    justify-content: flex-start;
-    margin-bottom: 10px;
+  .hero-topline,
+  body.card-focus-mode .card.is-fullscreen .hero-topline {
+    align-items: flex-start;
   }
 }

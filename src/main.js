@@ -18,10 +18,13 @@ const SLOT_DURATION_MS = 180000;
 const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
 const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
+const MOBILE_DESKTOP_VIEWPORT_WIDTH = 1280;
+const DEFAULT_VIEWPORT = "width=device-width, initial-scale=1.0, viewport-fit=cover";
 
 const els = {
   connect: document.getElementById("connect"),
   toggleDesktopMode: document.getElementById("toggleDesktopMode"),
+  viewportMeta: document.getElementById("viewportMeta"),
   account: document.getElementById("account"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
@@ -146,9 +149,28 @@ function syncFullscreenState() {
   });
 }
 
+function updateViewportMode() {
+  if (!els.viewportMeta) return;
+
+  const isMobileWidth = !DESKTOP_MEDIA_QUERY.matches;
+  const isFullscreenCard = Boolean(fullscreenCardId);
+
+  if (isFullscreenCard || !forceDesktopMode || !isMobileWidth) {
+    els.viewportMeta.setAttribute("content", DEFAULT_VIEWPORT);
+    return;
+  }
+
+  const scale = Math.min(window.innerWidth / MOBILE_DESKTOP_VIEWPORT_WIDTH, 1);
+  els.viewportMeta.setAttribute(
+    "content",
+    `width=${MOBILE_DESKTOP_VIEWPORT_WIDTH}, initial-scale=${scale}, viewport-fit=cover`
+  );
+}
+
 function setFullscreenCard(cardId) {
   fullscreenCardId = cardId;
   syncFullscreenState();
+  updateViewportMode();
 }
 
 function applyDesktopMode() {
@@ -168,6 +190,7 @@ function applyDesktopMode() {
   }
 
   syncFullscreenState();
+  updateViewportMode();
 }
 
 function setForceDesktopMode(enabled) {
@@ -1099,6 +1122,8 @@ if (typeof DESKTOP_MEDIA_QUERY.addEventListener === "function") {
 } else if (typeof DESKTOP_MEDIA_QUERY.addListener === "function") {
   DESKTOP_MEDIA_QUERY.addListener(applyDesktopMode);
 }
+
+window.addEventListener("resize", updateViewportMode);
 
 (async function boot() {
   try {
