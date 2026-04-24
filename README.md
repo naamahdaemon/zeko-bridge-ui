@@ -14,25 +14,17 @@ It lets you:
 
 ## Screenshots
 
-Replace the placeholders below once you have captures ready.
-
 ### Main dashboard
 
 ![Main dashboard placeholder](./docs/screenshots/main-dashboard.png)
-
-Suggested file: `docs/screenshots/main-dashboard.png`
 
 ### Deposit queue
 
 ![Deposit queue placeholder](./docs/screenshots/deposit-queue.png)
 
-Suggested file: `docs/screenshots/deposit-queue.png`
-
 ### Withdrawal queue
 
 ![Withdrawal queue placeholder](./docs/screenshots/withdrawal-queue.png)
-
-Suggested file: `docs/screenshots/withdrawal-queue.png`
 
 ## Features
 
