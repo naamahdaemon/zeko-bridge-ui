@@ -50,6 +50,15 @@ body.force-desktop.card-focus-mode .app {
   min-width: 0;
 }
 
+body.force-desktop.mobile-desktop-scaled .app {
+  width: 1180px;
+  min-width: 1180px;
+  max-width: none;
+  margin: 0;
+  transform-origin: top left;
+  transform: scale(var(--desktop-scale, 1));
+}
+
 .grid {
   display: grid;
   gap: 18px;

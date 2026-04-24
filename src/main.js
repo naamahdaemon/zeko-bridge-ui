@@ -19,12 +19,11 @@ const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
 const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
 const MOBILE_DESKTOP_VIEWPORT_WIDTH = 1280;
-const DEFAULT_VIEWPORT = "width=device-width, initial-scale=1.0, viewport-fit=cover";
+const DESKTOP_BASE_WIDTH = 1180;
 
 const els = {
   connect: document.getElementById("connect"),
   toggleDesktopMode: document.getElementById("toggleDesktopMode"),
-  viewportMeta: document.getElementById("viewportMeta"),
   account: document.getElementById("account"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
@@ -149,28 +148,30 @@ function syncFullscreenState() {
   });
 }
 
-function updateViewportMode() {
-  if (!els.viewportMeta) return;
-
+function updateDesktopScale() {
   const isMobileWidth = !DESKTOP_MEDIA_QUERY.matches;
-  const isFullscreenCard = Boolean(fullscreenCardId);
+  const shouldScaleDesktop = forceDesktopMode && isMobileWidth && !fullscreenCardId;
 
-  if (isFullscreenCard || !forceDesktopMode || !isMobileWidth) {
-    els.viewportMeta.setAttribute("content", DEFAULT_VIEWPORT);
+  document.body.classList.toggle("mobile-desktop-scaled", shouldScaleDesktop);
+
+  if (!shouldScaleDesktop) {
+    document.body.style.removeProperty("--desktop-scale");
+    document.body.style.removeProperty("min-height");
     return;
   }
 
-  const scale = Math.min(window.innerWidth / MOBILE_DESKTOP_VIEWPORT_WIDTH, 1);
-  els.viewportMeta.setAttribute(
-    "content",
-    `width=${MOBILE_DESKTOP_VIEWPORT_WIDTH}, initial-scale=${scale}, viewport-fit=cover`
-  );
+  const availableWidth = Math.max(window.innerWidth - 32, 320);
+  const scale = Math.min(availableWidth / DESKTOP_BASE_WIDTH, 1);
+  const scaledHeight = Math.ceil(document.documentElement.scrollHeight * scale);
+
+  document.body.style.setProperty("--desktop-scale", String(scale));
+  document.body.style.minHeight = `${Math.max(window.innerHeight, scaledHeight)}px`;
 }
 
 function setFullscreenCard(cardId) {
   fullscreenCardId = cardId;
   syncFullscreenState();
-  updateViewportMode();
+  updateDesktopScale();
 }
 
 function applyDesktopMode() {
@@ -190,7 +191,7 @@ function applyDesktopMode() {
   }
 
   syncFullscreenState();
-  updateViewportMode();
+  updateDesktopScale();
 }
 
 function setForceDesktopMode(enabled) {
@@ -1123,7 +1124,7 @@ if (typeof DESKTOP_MEDIA_QUERY.addEventListener === "function") {
   DESKTOP_MEDIA_QUERY.addListener(applyDesktopMode);
 }
 
-window.addEventListener("resize", updateViewportMode);
+window.addEventListener("resize", updateDesktopScale);
 
 (async function boot() {
   try {
