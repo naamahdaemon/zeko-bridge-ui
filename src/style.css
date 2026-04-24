@@ -574,6 +574,20 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   gap: 10px;
 }
 
+.local-history-grid {
+  min-width: 0;
+}
+
+.history-field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-field-error {
+  grid-column: 1 / -1;
+}
+
 .hash-row {
   display: inline-flex;
   align-items: center;

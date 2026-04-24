@@ -702,13 +702,13 @@ function renderLocalHistory() {
       return `
         <div class="queue-item">
           <div class="queue-title">${safeText(h.type)} • ${safeText(h.status)}</div>
-            <div class="queue-grid">
-              <div><strong>Time:</strong> ${safeText(h.time)}</div>
-              <div><strong>Hash:</strong> ${renderHashValue(h.hash)}</div>
-              <div><strong>Amount:</strong> ${safeText(h.amount)}</div>
-              <div><strong>Fee:</strong> ${safeText(h.fee)}</div>
-              <div><strong>Memo:</strong> ${safeText(h.memo)}</div>
-            <div><strong>Error:</strong> ${safeText(h.error)}</div>
+            <div class="queue-grid local-history-grid">
+              <div class="history-field"><strong>Time:</strong> ${safeText(h.time)}</div>
+              <div class="history-field"><strong>Hash:</strong> ${renderHashValue(h.hash)}</div>
+              <div class="history-field"><strong>Amount:</strong> ${safeText(h.amount)}</div>
+              <div class="history-field"><strong>Fee:</strong> ${safeText(h.fee)}</div>
+              <div class="history-field"><strong>Memo:</strong> ${safeText(h.memo)}</div>
+            <div class="history-field history-field-error"><strong>Error:</strong> ${safeText(h.error)}</div>
           </div>
         </div>
       `;
