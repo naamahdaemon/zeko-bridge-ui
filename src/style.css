@@ -317,6 +317,17 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   background: rgba(255, 252, 246, 0.98);
 }
 
+.card.is-fullscreen .section-heading {
+  position: relative;
+  padding-right: 110px;
+}
+
+.card.is-fullscreen .section-heading .card-action-wrap {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
 .card.is-fullscreen pre {
   max-height: none;
 }
@@ -563,5 +574,64 @@ pre {
 
   body:not(.force-desktop) .hero-copy {
     padding-right: 0;
+  }
+
+  body.card-focus-mode .card.is-fullscreen {
+    inset: 10px;
+    width: auto;
+    min-width: 0;
+    padding: 18px;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .section-heading,
+  body.card-focus-mode .card.is-fullscreen .detail-row,
+  body.card-focus-mode .card.is-fullscreen .actions {
+    flex-direction: column;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .section-heading {
+    padding-right: 110px;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .section-heading .card-action-wrap {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin-bottom: 0;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .hero,
+  body.card-focus-mode .card.is-fullscreen .two-up,
+  body.card-focus-mode .card.is-fullscreen .action-grid,
+  body.card-focus-mode .card.is-fullscreen .form-grid,
+  body.card-focus-mode .card.is-fullscreen .stats-strip {
+    grid-template-columns: 1fr;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .detail-row strong {
+    text-align: left;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .ghost-button,
+  body.card-focus-mode .card.is-fullscreen .actions button {
+    width: 100%;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .hash-row {
+    flex-wrap: wrap;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .hash-value {
+    max-width: 100%;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .hero-copy {
+    padding-right: 0;
+  }
+
+  body.card-focus-mode .card.is-fullscreen .hero-toolbar {
+    position: static;
+    justify-content: flex-start;
+    margin-bottom: 10px;
   }
 }
