@@ -18,27 +18,21 @@ Replace the placeholders below once you have captures ready.
 
 ### Main dashboard
 
-![Main dashboard placeholder](./docs/screenshots/main-dashboard-placeholder.svg)
+![Main dashboard placeholder](./docs/screenshots/main-dashboard.png)
 
 Suggested file: `docs/screenshots/main-dashboard.png`
 
 ### Deposit queue
 
-![Deposit queue placeholder](./docs/screenshots/deposit-queue-placeholder.svg)
+![Deposit queue placeholder](./docs/screenshots/deposit-queue.png)
 
 Suggested file: `docs/screenshots/deposit-queue.png`
 
 ### Withdrawal queue
 
-![Withdrawal queue placeholder](./docs/screenshots/withdrawal-queue-placeholder.svg)
+![Withdrawal queue placeholder](./docs/screenshots/withdrawal-queue.png)
 
 Suggested file: `docs/screenshots/withdrawal-queue.png`
-
-### Network switching prompt
-
-![Network switching placeholder](./docs/screenshots/network-switch-placeholder.svg)
-
-Suggested file: `docs/screenshots/network-switch.png`
 
 ## Features
 
