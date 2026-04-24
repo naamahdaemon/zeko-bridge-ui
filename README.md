@@ -16,7 +16,10 @@ It lets you:
 
 ### Main dashboard
 
-![Main dashboard placeholder](./docs/screenshots/main-dashboard.png)
+<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+  <img src="./docs/screenshots/main-dashboard.png" style="flex: 1 1 300px;" />
+  <img src="./docs/screenshots/main-dashboard-dark.png" style="flex: 1 1 300px;" />
+</div>
 
 ### Deposit queue
 
