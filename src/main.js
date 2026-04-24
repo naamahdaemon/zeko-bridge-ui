@@ -18,12 +18,14 @@ const SLOT_DURATION_MS = 180000;
 const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
 const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
-const MOBILE_DESKTOP_VIEWPORT_WIDTH = 1280;
 const DESKTOP_BASE_WIDTH = 1180;
 
 const els = {
   connect: document.getElementById("connect"),
   toggleDesktopMode: document.getElementById("toggleDesktopMode"),
+  desktopModeIcon: document.getElementById("desktopModeIcon"),
+  toggleThemeMode: document.getElementById("toggleThemeMode"),
+  themeModeIcon: document.getElementById("themeModeIcon"),
   account: document.getElementById("account"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
@@ -65,6 +67,42 @@ let pollTimer = null;
 let pollingInFlight = false;
 let fullscreenCardId = null;
 let forceDesktopMode = false;
+let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
+
+const ICONS = {
+  mobile: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="7" y="2.75" width="10" height="18.5" rx="2.5"></rect>
+      <path d="M10 5.75h4"></path>
+      <path d="M11.25 18.25h1.5"></path>
+    </svg>
+  `,
+  desktop: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+      <path d="M9 20h6"></path>
+      <path d="M12 16v4"></path>
+    </svg>
+  `,
+  light: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2.5v2.25"></path>
+      <path d="M12 19.25v2.25"></path>
+      <path d="M21.5 12h-2.25"></path>
+      <path d="M4.75 12H2.5"></path>
+      <path d="M18.72 5.28l-1.59 1.59"></path>
+      <path d="M6.87 17.13l-1.59 1.59"></path>
+      <path d="M18.72 18.72l-1.59-1.59"></path>
+      <path d="M6.87 6.87L5.28 5.28"></path>
+    </svg>
+  `,
+  dark: `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.75 8.75 0 1 0 20.5 14.2Z"></path>
+    </svg>
+  `
+};
 
 function log(...args) {
   const line = args
@@ -178,12 +216,19 @@ function applyDesktopMode() {
   document.body.classList.toggle("force-desktop", forceDesktopMode);
 
   if (els.toggleDesktopMode) {
-    els.toggleDesktopMode.textContent = forceDesktopMode ? "Desktop mode on" : "Desktop mode off";
     els.toggleDesktopMode.classList.toggle("is-active", forceDesktopMode);
     els.toggleDesktopMode.setAttribute("aria-pressed", String(forceDesktopMode));
+    els.toggleDesktopMode.setAttribute(
+      "aria-label",
+      forceDesktopMode ? "Disable desktop mode" : "Enable desktop mode"
+    );
     els.toggleDesktopMode.title = forceDesktopMode
       ? "Disable forced desktop layout"
       : "Force desktop layout, including on mobile";
+  }
+
+  if (els.desktopModeIcon) {
+    els.desktopModeIcon.innerHTML = forceDesktopMode ? ICONS.desktop : ICONS.mobile;
   }
 
   if (!isDesktopLayout() && fullscreenCardId) {
@@ -197,6 +242,31 @@ function applyDesktopMode() {
 function setForceDesktopMode(enabled) {
   forceDesktopMode = Boolean(enabled);
   applyDesktopMode();
+}
+
+function applyThemeMode() {
+  document.documentElement.setAttribute("data-theme", themeMode);
+
+  if (els.toggleThemeMode) {
+    const isDark = themeMode === "dark";
+    els.toggleThemeMode.classList.toggle("is-active", isDark);
+    els.toggleThemeMode.setAttribute("aria-pressed", String(isDark));
+    els.toggleThemeMode.setAttribute(
+      "aria-label",
+      isDark ? "Activate light mode" : "Activate dark mode"
+    );
+    els.toggleThemeMode.title = isDark ? "Activate light mode" : "Activate dark mode";
+  }
+
+  if (els.themeModeIcon) {
+    els.themeModeIcon.innerHTML = themeMode === "dark" ? ICONS.dark : ICONS.light;
+  }
+}
+
+function setThemeMode(nextTheme) {
+  themeMode = nextTheme === "dark" ? "dark" : "light";
+  savePreferences({ theme: themeMode });
+  applyThemeMode();
 }
 
 function createCardActionButton(label, role, onClick) {
@@ -1117,6 +1187,10 @@ els.toggleDesktopMode?.addEventListener("click", () => {
   setForceDesktopMode(!forceDesktopMode);
 });
 
+els.toggleThemeMode?.addEventListener("click", () => {
+  setThemeMode(themeMode === "dark" ? "light" : "dark");
+});
+
 if (typeof DESKTOP_MEDIA_QUERY.addEventListener === "function") {
   DESKTOP_MEDIA_QUERY.addEventListener("change", applyDesktopMode);
 } else if (typeof DESKTOP_MEDIA_QUERY.addListener === "function") {
@@ -1127,6 +1201,7 @@ window.addEventListener("resize", updateDesktopScale);
 
 (async function boot() {
   try {
+    applyThemeMode();
     initializeCardControls();
     renderAll();
 

@@ -14,6 +14,22 @@
   --warn: #b45309;
 }
 
+[data-theme="dark"] {
+  --bg: #171717;
+  --bg-accent: #20252c;
+  --card: rgba(31, 36, 45, 0.88);
+  --card-strong: #252c36;
+  --text: #edf2f7;
+  --muted: #a0aec0;
+  --line: rgba(226, 232, 240, 0.12);
+  --shadow: 0 20px 44px rgba(0, 0, 0, 0.34);
+  --primary: #2dd4bf;
+  --primary-strong: #14b8a6;
+  --warm: #fb923c;
+  --ok: #4ade80;
+  --warn: #f59e0b;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -101,18 +117,22 @@ body.force-desktop.mobile-desktop-scaled .app {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 10px;
+  min-height: 32px;
 }
 
 .hero-toolbar {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
   font-size: 12px;
+  line-height: 32px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--primary-strong);
@@ -279,6 +299,44 @@ button:disabled {
   background: rgba(15, 118, 110, 0.08);
 }
 
+.icon-button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  line-height: 1;
+}
+
+.icon-glyph {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.icon-glyph svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[data-theme="dark"] .subtle-button {
+  background: rgba(37, 44, 54, 0.92);
+  color: #dbe6f3;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+[data-theme="dark"] .subtle-button.is-active {
+  background: rgba(45, 212, 191, 0.14);
+  color: #7deee0;
+  border-color: rgba(45, 212, 191, 0.26);
+}
+
 .card-action-wrap {
   display: flex;
   align-items: start;
@@ -303,6 +361,50 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+[data-theme="dark"] .hero-status,
+[data-theme="dark"] .mini-stat,
+[data-theme="dark"] .summary-item,
+[data-theme="dark"] .queue-item,
+[data-theme="dark"] .detail-row,
+[data-theme="dark"] input,
+[data-theme="dark"] button,
+[data-theme="dark"] pre,
+[data-theme="dark"] .badge,
+[data-theme="dark"] .card-action-button {
+  background: var(--card-strong);
+  color: var(--text);
+}
+
+[data-theme="dark"] .hero-status {
+  background: linear-gradient(180deg, rgba(37, 44, 54, 0.98), rgba(31, 36, 45, 0.98));
+}
+
+[data-theme="dark"] .info-callout {
+  background: rgba(45, 212, 191, 0.1);
+  border-color: rgba(45, 212, 191, 0.14);
+  color: #b8fff4;
+}
+
+[data-theme="dark"] .status-pill {
+  background: rgba(251, 146, 60, 0.12);
+  border-color: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
+}
+
+[data-theme="dark"] .status-pill.connected {
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.2);
+  color: #86efac;
+}
+
+[data-theme="dark"] .copy-chip {
+  background: rgba(37, 44, 54, 0.95);
+}
+
+[data-theme="dark"] .card.is-fullscreen {
+  background: rgba(31, 36, 45, 0.98);
 }
 
 .card-action-button[data-role="reduce"] {
