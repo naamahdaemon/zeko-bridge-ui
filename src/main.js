@@ -64,7 +64,7 @@ let bridge = null;
 let pollTimer = null;
 let pollingInFlight = false;
 let fullscreenCardId = null;
-let forceDesktopMode = Boolean(loadPreferences().forceDesktop);
+let forceDesktopMode = false;
 
 function log(...args) {
   const line = args
@@ -196,7 +196,6 @@ function applyDesktopMode() {
 
 function setForceDesktopMode(enabled) {
   forceDesktopMode = Boolean(enabled);
-  savePreferences({ forceDesktop: forceDesktopMode });
   applyDesktopMode();
 }
 
