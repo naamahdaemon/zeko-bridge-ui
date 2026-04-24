@@ -68,6 +68,9 @@ let pollingInFlight = false;
 let fullscreenCardId = null;
 let forceDesktopMode = false;
 let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
+let orderedCardIds = [];
+let touchGestureStart = null;
+let pointerGestureStart = null;
 
 const ICONS = {
   mobile: `
@@ -206,6 +209,17 @@ function updateDesktopScale() {
   document.body.style.minHeight = `${Math.max(window.innerHeight, scaledHeight)}px`;
 }
 
+function getAdjacentCardId(direction) {
+  if (!fullscreenCardId || !orderedCardIds.length) return null;
+
+  const currentIndex = orderedCardIds.indexOf(fullscreenCardId);
+  if (currentIndex === -1) return null;
+
+  const nextIndex = currentIndex + direction;
+  if (nextIndex < 0 || nextIndex >= orderedCardIds.length) return null;
+  return orderedCardIds[nextIndex];
+}
+
 function setFullscreenCard(cardId) {
   fullscreenCardId = cardId;
   syncFullscreenState();
@@ -281,12 +295,14 @@ function createCardActionButton(label, role, onClick) {
 
 function initializeCardControls() {
   const cards = document.querySelectorAll(".card");
+  orderedCardIds = [];
 
   cards.forEach((card, index) => {
     if (card.dataset.cardId) return;
 
     const cardId = `card-${index + 1}`;
     card.dataset.cardId = cardId;
+    orderedCardIds.push(cardId);
 
     const actionWrap = document.createElement("div");
     actionWrap.className = "card-action-wrap";
@@ -306,6 +322,38 @@ function initializeCardControls() {
   });
 
   applyDesktopMode();
+}
+
+function handleFullscreenGestureEnd(endX, endY) {
+  if (!touchGestureStart || !fullscreenCardId) return;
+
+  const deltaX = endX - touchGestureStart.x;
+  const deltaY = endY - touchGestureStart.y;
+  touchGestureStart = null;
+
+  if (Math.abs(deltaX) < 72) return;
+  if (Math.abs(deltaX) < Math.abs(deltaY) * 1.2) return;
+
+  const nextCardId = deltaX < 0 ? getAdjacentCardId(1) : getAdjacentCardId(-1);
+  if (!nextCardId) return;
+
+  setFullscreenCard(nextCardId);
+}
+
+function handlePointerGestureEnd(endX, endY) {
+  if (!pointerGestureStart || !fullscreenCardId) return;
+
+  const deltaX = endX - pointerGestureStart.x;
+  const deltaY = endY - pointerGestureStart.y;
+  pointerGestureStart = null;
+
+  if (Math.abs(deltaX) < 96) return;
+  if (Math.abs(deltaX) < Math.abs(deltaY) * 1.2) return;
+
+  const nextCardId = deltaX < 0 ? getAdjacentCardId(1) : getAdjacentCardId(-1);
+  if (!nextCardId) return;
+
+  setFullscreenCard(nextCardId);
 }
 
 function formatMinaFromNanoLike(value) {
@@ -1181,6 +1229,71 @@ document.addEventListener("click", async (event) => {
   } catch (error) {
     log("Clipboard copy error:", error?.message || error);
   }
+});
+
+document.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!fullscreenCardId || event.touches.length !== 1) {
+      touchGestureStart = null;
+      return;
+    }
+
+    const fullscreenCard = event.target.closest(".card.is-fullscreen");
+    if (!fullscreenCard) {
+      touchGestureStart = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+    touchGestureStart = { x: touch.clientX, y: touch.clientY };
+  },
+  { passive: true }
+);
+
+document.addEventListener(
+  "touchend",
+  (event) => {
+    if (!touchGestureStart || !fullscreenCardId) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    handleFullscreenGestureEnd(touch.clientX, touch.clientY);
+  },
+  { passive: true }
+);
+
+document.addEventListener("touchcancel", () => {
+  touchGestureStart = null;
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!fullscreenCardId) {
+    pointerGestureStart = null;
+    return;
+  }
+
+  if (event.pointerType === "touch") return;
+  if (event.button !== 0) {
+    pointerGestureStart = null;
+    return;
+  }
+
+  const fullscreenCard = event.target.closest(".card.is-fullscreen");
+  if (!fullscreenCard) {
+    pointerGestureStart = null;
+    return;
+  }
+
+  pointerGestureStart = { x: event.clientX, y: event.clientY };
+});
+
+document.addEventListener("pointerup", (event) => {
+  if (!pointerGestureStart || event.pointerType === "touch") return;
+  handlePointerGestureEnd(event.clientX, event.clientY);
+});
+
+document.addEventListener("pointercancel", () => {
+  pointerGestureStart = null;
 });
 
 els.toggleDesktopMode?.addEventListener("click", () => {
