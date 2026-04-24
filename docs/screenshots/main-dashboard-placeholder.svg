@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Main dashboard placeholder</title>
+  <desc id="desc">Placeholder image for the main dashboard screenshot.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8f4eb" />
+      <stop offset="100%" stop-color="#efe4d1" />
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" rx="28" fill="url(#bg)" />
+  <rect x="48" y="48" width="1184" height="624" rx="24" fill="#fffaf2" stroke="#d8c7ab" stroke-width="3" />
+  <text x="96" y="132" fill="#2f3743" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="700">Main Dashboard</text>
+  <text x="96" y="178" fill="#6d7682" font-family="Segoe UI, Arial, sans-serif" font-size="22">Replace this file with a real application screenshot.</text>
+  <rect x="96" y="230" width="1088" height="112" rx="18" fill="#f7eddc" stroke="#dec9a6" />
+  <rect x="96" y="370" width="520" height="228" rx="18" fill="#f7eddc" stroke="#dec9a6" />
+  <rect x="664" y="370" width="520" height="228" rx="18" fill="#f7eddc" stroke="#dec9a6" />
+  <text x="640" y="650" text-anchor="middle" fill="#8a7354" font-family="Segoe UI, Arial, sans-serif" font-size="24">docs/screenshots/main-dashboard.png</text>
+</svg>

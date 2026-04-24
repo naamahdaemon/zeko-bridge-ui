@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Deposit queue placeholder</title>
+  <desc id="desc">Placeholder image for the deposit queue screenshot.</desc>
+  <rect width="1280" height="720" rx="28" fill="#f6efe2" />
+  <rect x="48" y="48" width="1184" height="624" rx="24" fill="#fffaf2" stroke="#d8c7ab" stroke-width="3" />
+  <text x="96" y="132" fill="#2f3743" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="700">Deposit Queue</text>
+  <text x="96" y="178" fill="#6d7682" font-family="Segoe UI, Arial, sans-serif" font-size="22">Add a capture of the deposit queue here.</text>
+  <rect x="96" y="228" width="1088" height="156" rx="20" fill="#fbf4e7" stroke="#dec9a6" />
+  <rect x="96" y="412" width="1088" height="156" rx="20" fill="#fbf4e7" stroke="#dec9a6" />
+  <text x="640" y="636" text-anchor="middle" fill="#8a7354" font-family="Segoe UI, Arial, sans-serif" font-size="24">docs/screenshots/deposit-queue.png</text>
+</svg>

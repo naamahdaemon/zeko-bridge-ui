@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Network switch placeholder</title>
+  <desc id="desc">Placeholder image for the network switching prompt screenshot.</desc>
+  <rect width="1280" height="720" rx="28" fill="#efe5d3" />
+  <rect x="0" y="0" width="1280" height="720" fill="#000" opacity="0.12" />
+  <rect x="360" y="140" width="560" height="440" rx="28" fill="#fffaf2" stroke="#d8c7ab" stroke-width="3" />
+  <text x="408" y="228" fill="#2f3743" font-family="Segoe UI, Arial, sans-serif" font-size="38" font-weight="700">Network Switch Prompt</text>
+  <text x="408" y="280" fill="#6d7682" font-family="Segoe UI, Arial, sans-serif" font-size="22">Replace with a wallet confirmation screenshot.</text>
+  <rect x="408" y="334" width="464" height="92" rx="18" fill="#f7eddc" stroke="#dec9a6" />
+  <rect x="408" y="462" width="180" height="56" rx="28" fill="#d6c09b" />
+  <rect x="692" y="462" width="180" height="56" rx="28" fill="#f1e5d1" stroke="#dec9a6" />
+  <text x="640" y="550" text-anchor="middle" fill="#8a7354" font-family="Segoe UI, Arial, sans-serif" font-size="22">docs/screenshots/network-switch.png</text>
+</svg>
