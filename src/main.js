@@ -17,9 +17,11 @@ const POLL_INTERVAL_MS = 15000;
 const SLOT_DURATION_MS = 180000;
 const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
+const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
 
 const els = {
   connect: document.getElementById("connect"),
+  toggleDesktopMode: document.getElementById("toggleDesktopMode"),
   account: document.getElementById("account"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
@@ -59,6 +61,8 @@ let account = null;
 let bridge = null;
 let pollTimer = null;
 let pollingInFlight = false;
+let fullscreenCardId = null;
+let forceDesktopMode = Boolean(loadPreferences().forceDesktop);
 
 function log(...args) {
   const line = args
@@ -87,6 +91,16 @@ function saveState(next) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
+function loadPreferences() {
+  const s = loadState();
+  return s.preferences && typeof s.preferences === "object" ? s.preferences : {};
+}
+
+function savePreferences(preferences) {
+  const s = loadState();
+  saveState({ ...s, preferences: { ...loadPreferences(), ...preferences } });
+}
+
 function getStoredHistory() {
   const s = loadState();
   return Array.isArray(s.history) ? s.history : [];
@@ -108,6 +122,97 @@ function clearHistory() {
   const s = loadState();
   saveState({ ...s, history: [] });
   renderLocalHistory();
+}
+
+function isDesktopLayout() {
+  return forceDesktopMode || DESKTOP_MEDIA_QUERY.matches;
+}
+
+function syncFullscreenState() {
+  const cards = document.querySelectorAll(".card");
+  const isFocused = Boolean(fullscreenCardId) && isDesktopLayout();
+
+  document.body.classList.toggle("card-focus-mode", isFocused);
+
+  cards.forEach((card) => {
+    const isCurrent = isFocused && card.dataset.cardId === fullscreenCardId;
+    card.classList.toggle("is-fullscreen", isCurrent);
+
+    const expandButton = card.querySelector('[data-role="expand"]');
+    const reduceButton = card.querySelector('[data-role="reduce"]');
+
+    if (expandButton) expandButton.hidden = !isDesktopLayout() || isCurrent;
+    if (reduceButton) reduceButton.hidden = !isCurrent;
+  });
+}
+
+function setFullscreenCard(cardId) {
+  fullscreenCardId = cardId;
+  syncFullscreenState();
+}
+
+function applyDesktopMode() {
+  document.body.classList.toggle("force-desktop", forceDesktopMode);
+
+  if (els.toggleDesktopMode) {
+    els.toggleDesktopMode.textContent = forceDesktopMode ? "Desktop mode on" : "Desktop mode off";
+    els.toggleDesktopMode.classList.toggle("is-active", forceDesktopMode);
+    els.toggleDesktopMode.setAttribute("aria-pressed", String(forceDesktopMode));
+    els.toggleDesktopMode.title = forceDesktopMode
+      ? "Disable forced desktop layout"
+      : "Force desktop layout, including on mobile";
+  }
+
+  if (!isDesktopLayout() && fullscreenCardId) {
+    fullscreenCardId = null;
+  }
+
+  syncFullscreenState();
+}
+
+function setForceDesktopMode(enabled) {
+  forceDesktopMode = Boolean(enabled);
+  savePreferences({ forceDesktop: forceDesktopMode });
+  applyDesktopMode();
+}
+
+function createCardActionButton(label, role, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "card-action-button";
+  button.dataset.role = role;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function initializeCardControls() {
+  const cards = document.querySelectorAll(".card");
+
+  cards.forEach((card, index) => {
+    if (card.dataset.cardId) return;
+
+    const cardId = `card-${index + 1}`;
+    card.dataset.cardId = cardId;
+
+    const actionWrap = document.createElement("div");
+    actionWrap.className = "card-action-wrap";
+
+    const expandButton = createCardActionButton("Expand", "expand", () => setFullscreenCard(cardId));
+    const reduceButton = createCardActionButton("Reduce", "reduce", () => setFullscreenCard(null));
+
+    actionWrap.append(expandButton, reduceButton);
+
+    const heading = card.querySelector(".section-heading");
+    if (heading) {
+      heading.append(actionWrap);
+    } else {
+      actionWrap.classList.add("card-action-wrap--floating");
+      card.prepend(actionWrap);
+    }
+  });
+
+  applyDesktopMode();
 }
 
 function formatMinaFromNanoLike(value) {
@@ -985,8 +1090,19 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+els.toggleDesktopMode?.addEventListener("click", () => {
+  setForceDesktopMode(!forceDesktopMode);
+});
+
+if (typeof DESKTOP_MEDIA_QUERY.addEventListener === "function") {
+  DESKTOP_MEDIA_QUERY.addEventListener("change", applyDesktopMode);
+} else if (typeof DESKTOP_MEDIA_QUERY.addListener === "function") {
+  DESKTOP_MEDIA_QUERY.addListener(applyDesktopMode);
+}
+
 (async function boot() {
   try {
+    initializeCardControls();
     renderAll();
 
     const existing = await getConnectedAccount();
