@@ -2,4 +2,3 @@
 *.bak
 /node_modules
 docs/CNAME
-/docs/screenshots
