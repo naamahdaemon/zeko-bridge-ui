@@ -14,6 +14,7 @@ import {
 
 const STORAGE_KEY = "zeko-bridge-ui:v2";
 const POLL_INTERVAL_MS = 15000;
+const POLLING_DRAIN_TIMEOUT_MS = 10000;
 const SLOT_DURATION_MS = 180000;
 const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
@@ -853,13 +854,22 @@ function stopPolling() {
 }
 
 async function safelyRefreshBeforeAction() {
-  if (pollingInFlight) {
-    log("Waiting for polling to finish before action...");
-    while (pollingInFlight) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+  await waitForPollingIdle();
   await refreshQueues();
+}
+
+async function waitForPollingIdle(timeoutMs = POLLING_DRAIN_TIMEOUT_MS) {
+  if (!pollingInFlight) return;
+
+  log("Waiting for polling to finish before action...");
+  const startedAt = Date.now();
+
+  while (pollingInFlight) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Polling did not finish within ${Math.round(timeoutMs / 1000)}s. Try again in a moment.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 async function runBridgeAction(actionName, callback) {
@@ -867,11 +877,20 @@ async function runBridgeAction(actionName, callback) {
     throw new Error(`Another bridge action is already in progress. Please wait before starting ${actionName}.`);
   }
 
+  const shouldResumePolling = Boolean(pollTimer);
+  if (shouldResumePolling) {
+    stopPolling();
+  }
+
+  await waitForPollingIdle();
   actionInFlight = true;
   try {
     return await callback();
   } finally {
     actionInFlight = false;
+    if (shouldResumePolling) {
+      startPolling();
+    }
   }
 }
 

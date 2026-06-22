@@ -57,6 +57,10 @@ function getProviderMethod(mina, methodName) {
   }
 }
 
+function hasProviderMethod(mina, methodName) {
+  return Boolean(getProviderMethod(mina, methodName));
+}
+
 async function callProviderRequest(mina, methodCandidates, payload) {
   const request = getProviderMethod(mina, "request");
   if (!request) return { ok: false };
@@ -286,15 +290,27 @@ export function createWalletTransactionSigner({
       }
     };
 
+    const canCallDirectSignTransaction = hasProviderMethod(mina, "signTransaction");
+    const canCallSendTransaction =
+      hasProviderMethod(mina, "sendTransaction") || hasProviderMethod(mina, "request");
+
     let signingResult;
-    try {
-      signingResult = await callProvider(
-        mina,
-        ["signTransaction"],
-        ["mina_signTransaction", "signTransaction"],
-        signingPayload
-      );
-    } catch (error) {
+    let signTransactionError = null;
+
+    if (canCallDirectSignTransaction) {
+      try {
+        signingResult = await callProvider(
+          mina,
+          ["signTransaction"],
+          ["mina_signTransaction", "signTransaction"],
+          signingPayload
+        );
+      } catch (error) {
+        signTransactionError = error;
+      }
+    }
+
+    if (!signingResult && canCallSendTransaction) {
       try {
         signingResult = await callProvider(
           mina,
@@ -306,10 +322,29 @@ export function createWalletTransactionSigner({
           }
         );
       } catch (fallbackError) {
-        throw new Error(
-          `The connected Mina wallet does not support transaction signing. ${getProviderDiagnostics(mina)}. signTransaction=${error?.message || error}; onlySign=${fallbackError?.message || fallbackError}`
-        );
+        if (!canCallDirectSignTransaction) {
+          try {
+            signingResult = await callProvider(
+              mina,
+              [],
+              ["mina_signTransaction", "signTransaction"],
+              signingPayload
+            );
+          } catch (requestSignError) {
+            throw new Error(
+              `The connected Mina wallet does not support transaction signing. ${getProviderDiagnostics(mina)}. onlySign=${fallbackError?.message || fallbackError}; signTransaction=${requestSignError?.message || requestSignError}`
+            );
+          }
+        } else {
+          throw new Error(
+            `The connected Mina wallet does not support transaction signing. ${getProviderDiagnostics(mina)}. signTransaction=${signTransactionError?.message || signTransactionError}; onlySign=${fallbackError?.message || fallbackError}`
+          );
+        }
       }
+    }
+
+    if (!signingResult && signTransactionError) {
+      throw signTransactionError;
     }
 
     const signedPayload = extractSignedTransactionPayload(signingResult);
