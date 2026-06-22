@@ -14,7 +14,7 @@ import {
 
 const STORAGE_KEY = "zeko-bridge-ui:v2";
 const POLL_INTERVAL_MS = 15000;
-const POLLING_DRAIN_TIMEOUT_MS = 10000;
+const POLLING_DRAIN_TIMEOUT_MS = 30000;
 const SLOT_DURATION_MS = 180000;
 const L1_NETWORK_ID = "mina:devnet";
 const L2_NETWORK_ID = "zeko:testnet";
@@ -67,6 +67,7 @@ let bridge = null;
 let pollTimer = null;
 let pollingInFlight = false;
 let actionInFlight = false;
+let refreshGeneration = 0;
 let fullscreenCardId = null;
 let forceDesktopMode = false;
 let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
@@ -799,7 +800,7 @@ async function ensureBridgeInitialized() {
   await initializeBridge();
 }
 
-async function refreshQueues() {
+async function refreshQueues({ generation = refreshGeneration } = {}) {
   requireConnected();
   await ensureBridgeInitialized();
   requireBridge();
@@ -812,6 +813,10 @@ async function refreshQueues() {
       getWithdrawalCapabilities(bridge, account)
     ]);
 
+  if (generation !== refreshGeneration) {
+    return false;
+  }
+
   uiState.depositState = depositState;
   uiState.depositCapabilities = depositCapabilities;
   uiState.withdrawalState = withdrawalState;
@@ -819,6 +824,7 @@ async function refreshQueues() {
   uiState.lastRefreshAt = new Date().toISOString();
 
   renderAll();
+  return true;
 }
 
 async function pollOnce() {
@@ -853,9 +859,8 @@ function stopPolling() {
   renderTopStatus();
 }
 
-async function safelyRefreshBeforeAction() {
-  await waitForPollingIdle();
-  await refreshQueues();
+async function safelyRefreshBeforeAction(generation = refreshGeneration) {
+  await refreshQueues({ generation });
 }
 
 async function waitForPollingIdle(timeoutMs = POLLING_DRAIN_TIMEOUT_MS) {
@@ -882,10 +887,10 @@ async function runBridgeAction(actionName, callback) {
     stopPolling();
   }
 
-  await waitForPollingIdle();
+  refreshGeneration += 1;
   actionInFlight = true;
   try {
-    return await callback();
+    return await callback(refreshGeneration);
   } finally {
     actionInFlight = false;
     if (shouldResumePolling) {
@@ -944,7 +949,7 @@ els.stopPolling.addEventListener("click", () => {
 
 els.deposit.addEventListener("click", async () => {
   try {
-    await runBridgeAction("deposit submission", async () => {
+    await runBridgeAction("deposit submission", async (actionGeneration) => {
       requireConnected();
       await ensureBridgeInitialized();
       requireBridge();
@@ -973,7 +978,7 @@ els.deposit.addEventListener("click", async () => {
       });
 
       log("Deposit submitted:", result);
-      await refreshQueues();
+      await refreshQueues({ generation: actionGeneration });
       startPolling();
     });
   } catch (error) {
@@ -994,7 +999,7 @@ els.deposit.addEventListener("click", async () => {
 
 els.withdraw.addEventListener("click", async () => {
   try {
-    await runBridgeAction("withdrawal submission", async () => {
+    await runBridgeAction("withdrawal submission", async (actionGeneration) => {
       requireConnected();
       await ensureBridgeInitialized();
       requireBridge();
@@ -1023,7 +1028,7 @@ els.withdraw.addEventListener("click", async () => {
       });
 
       log("Withdrawal submitted:", result);
-      await refreshQueues();
+      await refreshQueues({ generation: actionGeneration });
       startPolling();
     });
   } catch (error) {
@@ -1044,12 +1049,12 @@ els.withdraw.addEventListener("click", async () => {
 
 els.claimNextDeposit.addEventListener("click", async () => {
   try {
-    await runBridgeAction("deposit finalization", async () => {
+    await runBridgeAction("deposit finalization", async (actionGeneration) => {
       requireConnected();
       await ensureBridgeInitialized();
       requireBridge();
 
-      await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction(actionGeneration);
 
       const caps = uiState.depositCapabilities;
       const nextClaimable = pickNextClaimableDeposit(uiState.depositState);
@@ -1087,7 +1092,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
       });
 
       log("Claim next eligible deposit submitted:", result);
-      await refreshQueues();
+      await refreshQueues({ generation: actionGeneration });
     });
   } catch (error) {
     const message = error?.message || String(error);
@@ -1120,12 +1125,12 @@ els.claimNextDeposit.addEventListener("click", async () => {
 
 els.cancelNextDeposit.addEventListener("click", async () => {
   try {
-    await runBridgeAction("deposit cancellation", async () => {
+    await runBridgeAction("deposit cancellation", async (actionGeneration) => {
       requireConnected();
       await ensureBridgeInitialized();
       requireBridge();
 
-      await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction(actionGeneration);
 
       const caps = uiState.depositCapabilities;
       const nextCancellable = pickNextCancellableDeposit(uiState.depositState);
@@ -1163,7 +1168,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
       });
 
       log("Cancel next eligible deposit submitted:", result);
-      await refreshQueues();
+      await refreshQueues({ generation: actionGeneration });
     });
   } catch (error) {
     const message = error?.message || String(error);
@@ -1196,12 +1201,12 @@ els.cancelNextDeposit.addEventListener("click", async () => {
 
 els.finalizeNextWithdrawal.addEventListener("click", async () => {
   try {
-    await runBridgeAction("withdrawal finalization", async () => {
+    await runBridgeAction("withdrawal finalization", async (actionGeneration) => {
       requireConnected();
       await ensureBridgeInitialized();
       requireBridge();
 
-      await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction(actionGeneration);
 
       const caps = uiState.withdrawalCapabilities;
       const nextFinalizable = pickNextFinalizableWithdrawal(uiState.withdrawalState);
@@ -1239,7 +1244,7 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
       });
 
       log("Finalize next eligible withdrawal submitted:", result);
-      await refreshQueues();
+      await refreshQueues({ generation: actionGeneration });
     });
   } catch (error) {
     const message = error?.message || String(error);
