@@ -1,11 +1,11 @@
 import { Bridge, diagnoseBridgeHistory } from "@zeko-labs/bridge-sdk";
-import { PublicKey, UInt32, UInt64 } from "o1js";
+import { PublicKey, UInt32, UInt64, fetchAccount, setGraphqlEndpoint } from "o1js";
 
 const MINA = 1e9;
 const BRIDGE_CONFIG = {
-  l1Url: "https://api.minascan.io/node/devnet/v1/graphql",
-  l1ArchiveUrl: "https://api.minascan.io/archive/devnet/v1/graphql",
-  actionsApi: "https://api.actions.zeko.io/graphql",
+  l1Url: "https://gateway.mina.devnet.zeko.io",
+  l1ArchiveUrl: "https://gateway.mina.archive.devnet.zeko.io",
+  actionsApi: "https://testnet.api.actions.zeko.io/graphql",
   zekoUrl: "https://testnet.zeko.io/graphql",
   zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql",
   l1Network: "testnet",
@@ -79,6 +79,124 @@ function dedupeWithdrawals(withdrawals) {
   return [...deduped.values()];
 }
 
+function hasVerificationKeyLookupError(error) {
+  return String(error?.message || error).includes("Verification key not found");
+}
+
+function describeVerificationKeyResult(result) {
+  const base = `${result.label}=${result.publicKey}`;
+
+  if (result.status === "ok") {
+    return `${base} [vk ok: ${result.hash}]`;
+  }
+
+  if (result.status === "fetch-error") {
+    return `${base} [fetch error: ${result.reason}]`;
+  }
+
+  return `${base} [${result.status}]`;
+}
+
+async function fetchVerificationKeyStatus(label, publicKey, graphqlEndpoint) {
+  const publicKeyBase58 = toComparableString(publicKey);
+
+  try {
+    const result = await fetchAccount(
+      { publicKey: publicKeyBase58 },
+      graphqlEndpoint
+    );
+
+    if (result?.error) {
+      return {
+        label,
+        publicKey: publicKeyBase58,
+        endpoint: graphqlEndpoint,
+        status: "fetch-error",
+        reason: result.error.message ?? String(result.error)
+      };
+    }
+
+    if (!result?.account) {
+      return {
+        label,
+        publicKey: publicKeyBase58,
+        endpoint: graphqlEndpoint,
+        status: "missing-account"
+      };
+    }
+
+    if (!result.account.zkapp) {
+      return {
+        label,
+        publicKey: publicKeyBase58,
+        endpoint: graphqlEndpoint,
+        status: "not-zkapp"
+      };
+    }
+
+    if (!result.account.zkapp.verificationKey) {
+      return {
+        label,
+        publicKey: publicKeyBase58,
+        endpoint: graphqlEndpoint,
+        status: "missing-verification-key"
+      };
+    }
+
+    return {
+      label,
+      publicKey: publicKeyBase58,
+      endpoint: graphqlEndpoint,
+      status: "ok",
+      hash: result.account.zkapp.verificationKey.hash.toString()
+    };
+  } catch (error) {
+    return {
+      label,
+      publicKey: publicKeyBase58,
+      endpoint: graphqlEndpoint,
+      status: "fetch-error",
+      reason: error?.message ?? String(error)
+    };
+  }
+}
+
+async function warmAccountCache(checks, graphqlEndpoint) {
+  setGraphqlEndpoint(graphqlEndpoint);
+  await Promise.all(
+    checks.map((check) =>
+      fetchAccount(
+        { publicKey: check.publicKey, tokenId: check.tokenId },
+        graphqlEndpoint
+      ).catch(() => null)
+    )
+  );
+}
+
+async function withVerificationKeyDiagnostics(actionLabel, graphqlEndpoint, checks, operation) {
+  await warmAccountCache(checks, graphqlEndpoint);
+
+  try {
+    return await operation();
+  } catch (error) {
+    if (!hasVerificationKeyLookupError(error)) {
+      throw error;
+    }
+
+    const diagnostics = await Promise.all(
+      checks.map((check) =>
+        fetchVerificationKeyStatus(check.label, check.publicKey, check.endpoint)
+      )
+    );
+
+    const detail = diagnostics.map(describeVerificationKeyResult).join("; ");
+    const endpoints = [...new Set(diagnostics.map((entry) => entry.endpoint))].join(", ");
+    throw new Error(
+      `${actionLabel}: Verification key not found. Checked ${endpoints}. ${detail}`
+    );
+  }
+}
+
 async function getDepositTimestampFallbacks(account) {
   const walletAddress = toComparableString(account);
   const cached = depositDiagnosticsCache.get(walletAddress);
@@ -110,36 +228,56 @@ export async function initBridge() {
   return await Bridge.init(BRIDGE_CONFIG);
 }
 
-export async function submitDepositTx(bridge, account, amount, fee) {
+export async function submitDepositTx(bridge, account, amount, fee, signTransaction) {
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
-  return await bridge.submitDeposit(
-    {
-      sender: PublicKey.fromBase58(account),
-      fee: toNanoFee(fee)
-    },
-    {
-      recipient: PublicKey.fromBase58(account),
-      amount: UInt64.from(toNano(amount)),
-      timeout: UInt32.MAXINT(),
-      holderAccountL1: bridge.outerHolders[0]
-    }
+  return await withVerificationKeyDiagnostics(
+    "submitDeposit",
+    BRIDGE_CONFIG.l1Url,
+    [
+      { label: "outerPk", publicKey: bridge.outerPk, endpoint: BRIDGE_CONFIG.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+    ],
+    () =>
+      bridge.submitDeposit(
+        {
+          sender: PublicKey.fromBase58(account),
+          fee: toNanoFee(fee)
+        },
+        {
+          recipient: PublicKey.fromBase58(account),
+          amount: UInt64.from(toNano(amount)),
+          timeout: UInt32.MAXINT(),
+          holderAccountL1: bridge.outerHolders[0]
+        },
+        signTransaction
+      )
   );
 }
 
-export async function submitWithdrawalTx(bridge, account, amount, fee) {
+export async function submitWithdrawalTx(bridge, account, amount, fee, signTransaction) {
   if (!bridge) throw new Error("Bridge is not initialized.");
 
-  return await bridge.submitWithdrawal(
-    {
-      sender: PublicKey.fromBase58(account),
-      fee: toNanoFee(fee)
-    },
-    {
-      recipient: PublicKey.fromBase58(account),
-      amount: UInt64.from(toNano(amount))
-    }
+  return await withVerificationKeyDiagnostics(
+    "submitWithdrawal",
+    BRIDGE_CONFIG.zekoUrl,
+    [
+      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: BRIDGE_CONFIG.zekoUrl },
+      { label: "innerPk", publicKey: bridge.innerPk, endpoint: BRIDGE_CONFIG.zekoUrl }
+    ],
+    () =>
+      bridge.submitWithdrawal(
+        {
+          sender: PublicKey.fromBase58(account),
+          fee: toNanoFee(fee)
+        },
+        {
+          recipient: PublicKey.fromBase58(account),
+          amount: UInt64.from(toNano(amount))
+        },
+        signTransaction
+      )
   );
 }
 
@@ -209,39 +347,62 @@ export async function getWithdrawalCapabilities(bridge, account) {
   };
 }
 
-export async function buildFinalizeDepositTx(bridge, account, fee) {
+export async function buildFinalizeDepositTx(bridge, account, fee, signTransaction) {
   if (!bridge) throw new Error("Bridge is not initialized.");
 
-  return await bridge.finalizeDeposit(
-    PublicKey.fromBase58(account),
-    UInt64.from(toNanoFee(fee))
+  return await withVerificationKeyDiagnostics(
+    "finalizeDeposit",
+    BRIDGE_CONFIG.zekoUrl,
+    [
+      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: BRIDGE_CONFIG.zekoUrl }
+    ],
+    () =>
+      bridge.finalizeDeposit(
+        PublicKey.fromBase58(account),
+        signTransaction,
+        { feeNanomina: toNanoFee(fee) }
+      )
   );
 }
 
-export async function buildCancelDepositTx(bridge, account, fee) {
+export async function buildCancelDepositTx(bridge, account, fee, signTransaction) {
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
-  return await bridge.cancelDeposit(
-    PublicKey.fromBase58(account),
-    {
-      sender: PublicKey.fromBase58(account),
-      fee: toNanoFee(fee)
-    },
-    bridge.outerHolders[0]
+  return await withVerificationKeyDiagnostics(
+    "cancelDeposit",
+    BRIDGE_CONFIG.l1Url,
+    [
+      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: BRIDGE_CONFIG.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+    ],
+    () =>
+      bridge.cancelDeposit(
+        PublicKey.fromBase58(account),
+        signTransaction,
+        bridge.outerHolders[0],
+        { feeNanomina: toNanoFee(fee) }
+      )
   );
 }
 
-export async function buildFinalizeWithdrawalTx(bridge, account, fee) {
+export async function buildFinalizeWithdrawalTx(bridge, account, fee, signTransaction) {
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
-  return await bridge.finalizeWithdrawal(
-    PublicKey.fromBase58(account),
-    {
-      sender: PublicKey.fromBase58(account),
-      fee: toNanoFee(fee)
-    },
-    bridge.outerHolders[0]
+  return await withVerificationKeyDiagnostics(
+    "finalizeWithdrawal",
+    BRIDGE_CONFIG.l1Url,
+    [
+      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: BRIDGE_CONFIG.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+    ],
+    () =>
+      bridge.finalizeWithdrawal(
+        PublicKey.fromBase58(account),
+        signTransaction,
+        bridge.outerHolders[0],
+        { feeNanomina: toNanoFee(fee) }
+      )
   );
 }

@@ -1,4 +1,4 @@
-import { connectWallet, getConnectedAccount, sendTransaction } from "./wallet.js";
+import { connectWallet, createWalletTransactionSigner, getConnectedAccount } from "./wallet.js";
 import {
   initBridge,
   submitDepositTx,
@@ -65,6 +65,7 @@ let account = null;
 let bridge = null;
 let pollTimer = null;
 let pollingInFlight = false;
+let actionInFlight = false;
 let fullscreenCardId = null;
 let forceDesktopMode = false;
 let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
@@ -771,6 +772,18 @@ function renderAll() {
   renderLocalHistory();
 }
 
+function extractBridgeResultHash(result) {
+  if (typeof result === "string") return result;
+
+  return (
+    result?.hash ||
+    result?.transactionHash ||
+    result?.txHash ||
+    result?.id ||
+    null
+  );
+}
+
 async function initializeBridge() {
   log("Initializing bridge...");
   bridge = await initBridge();
@@ -779,8 +792,15 @@ async function initializeBridge() {
   log("outerHolders:", bridge.outerHolders ?? []);
 }
 
+async function ensureBridgeInitialized() {
+  if (bridge) return;
+  requireConnected();
+  await initializeBridge();
+}
+
 async function refreshQueues() {
   requireConnected();
+  await ensureBridgeInitialized();
   requireBridge();
 
   const [depositState, depositCapabilities, withdrawalState, withdrawalCapabilities] =
@@ -801,7 +821,7 @@ async function refreshQueues() {
 }
 
 async function pollOnce() {
-  if (pollingInFlight) return;
+  if (pollingInFlight || actionInFlight) return;
   pollingInFlight = true;
 
   try {
@@ -833,12 +853,32 @@ function stopPolling() {
 }
 
 async function safelyRefreshBeforeAction() {
+  if (pollingInFlight) {
+    log("Waiting for polling to finish before action...");
+    while (pollingInFlight) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
   await refreshQueues();
+}
+
+async function runBridgeAction(actionName, callback) {
+  if (actionInFlight) {
+    throw new Error(`Another bridge action is already in progress. Please wait before starting ${actionName}.`);
+  }
+
+  actionInFlight = true;
+  try {
+    return await callback();
+  } finally {
+    actionInFlight = false;
+  }
 }
 
 els.connect.addEventListener("click", async () => {
   try {
     account = await connectWallet();
+    renderTopStatus();
     log("Connected:", account);
 
     await initializeBridge();
@@ -846,6 +886,7 @@ els.connect.addEventListener("click", async () => {
     startPolling();
   } catch (error) {
     bridge = null;
+    renderTopStatus();
     log("Connect/init error:", error?.message || error);
     console.error(error);
   }
@@ -853,6 +894,11 @@ els.connect.addEventListener("click", async () => {
 
 els.refreshState.addEventListener("click", async () => {
   try {
+    if (actionInFlight) {
+      log("Refresh skipped because a bridge action is in progress.");
+      return;
+    }
+    await ensureBridgeInitialized();
     await refreshQueues();
     log("State refreshed");
   } catch (error) {
@@ -862,12 +908,15 @@ els.refreshState.addEventListener("click", async () => {
 });
 
 els.startPolling.addEventListener("click", () => {
-  try {
-    requireBridge();
-    startPolling();
-  } catch (error) {
-    log("Start polling error:", error?.message || error);
-  }
+  (async () => {
+    try {
+      await ensureBridgeInitialized();
+      requireBridge();
+      startPolling();
+    } catch (error) {
+      log("Start polling error:", error?.message || error);
+    }
+  })();
 });
 
 els.stopPolling.addEventListener("click", () => {
@@ -876,41 +925,38 @@ els.stopPolling.addEventListener("click", () => {
 
 els.deposit.addEventListener("click", async () => {
   try {
-    requireConnected();
-    requireBridge();
+    await runBridgeAction("deposit submission", async () => {
+      requireConnected();
+      await ensureBridgeInitialized();
+      requireBridge();
 
-    const amount = els.amount.value;
-    const fee = els.fee.value;
+      const amount = els.amount.value;
+      const fee = els.fee.value;
+      const signTransaction = createWalletTransactionSigner({
+        fee,
+        memo: "zeko-deposit",
+        requiredNetwork: L1_NETWORK_ID
+      });
 
-    log("Building deposit transaction...");
-    const tx = await submitDepositTx(bridge, account, amount, fee);
+      log("Submitting deposit through bridge SDK...");
+      const result = await submitDepositTx(bridge, account, amount, fee, signTransaction);
+      const hash = extractBridgeResultHash(result);
 
-    log("Sending deposit transaction...");
-    const result = await sendTransaction(tx, fee, "zeko-deposit", {
-      requiredNetwork: L1_NETWORK_ID
+      appendHistory({
+        type: "deposit-submit",
+        status: "submitted",
+        hash,
+        amount,
+        fee,
+        memo: "zeko-deposit",
+        time: new Date().toISOString(),
+        error: null
+      });
+
+      log("Deposit submitted:", result);
+      await refreshQueues();
+      startPolling();
     });
-
-    const hash =
-      result?.hash ||
-      result?.transactionHash ||
-      result?.txHash ||
-      result?.id ||
-      null;
-
-    appendHistory({
-      type: "deposit-submit",
-      status: "submitted",
-      hash,
-      amount,
-      fee,
-      memo: "zeko-deposit",
-      time: new Date().toISOString(),
-      error: null
-    });
-
-    log("Deposit submitted:", result);
-    await refreshQueues();
-    startPolling();
   } catch (error) {
     appendHistory({
       type: "deposit-submit",
@@ -929,41 +975,38 @@ els.deposit.addEventListener("click", async () => {
 
 els.withdraw.addEventListener("click", async () => {
   try {
-    requireConnected();
-    requireBridge();
+    await runBridgeAction("withdrawal submission", async () => {
+      requireConnected();
+      await ensureBridgeInitialized();
+      requireBridge();
 
-    const amount = els.amount.value;
-    const fee = els.fee.value;
+      const amount = els.amount.value;
+      const fee = els.fee.value;
+      const signTransaction = createWalletTransactionSigner({
+        fee,
+        memo: "zeko-withdraw",
+        requiredNetwork: L2_NETWORK_ID
+      });
 
-    log("Building withdrawal transaction...");
-    const tx = await submitWithdrawalTx(bridge, account, amount, fee);
+      log("Submitting withdrawal through bridge SDK...");
+      const result = await submitWithdrawalTx(bridge, account, amount, fee, signTransaction);
+      const hash = extractBridgeResultHash(result);
 
-    log("Sending withdrawal transaction...");
-    const result = await sendTransaction(tx, fee, "zeko-withdraw", {
-      requiredNetwork: L2_NETWORK_ID
+      appendHistory({
+        type: "withdraw-submit",
+        status: "submitted",
+        hash,
+        amount,
+        fee,
+        memo: "zeko-withdraw",
+        time: new Date().toISOString(),
+        error: null
+      });
+
+      log("Withdrawal submitted:", result);
+      await refreshQueues();
+      startPolling();
     });
-
-    const hash =
-      result?.hash ||
-      result?.transactionHash ||
-      result?.txHash ||
-      result?.id ||
-      null;
-
-    appendHistory({
-      type: "withdraw-submit",
-      status: "submitted",
-      hash,
-      amount,
-      fee,
-      memo: "zeko-withdraw",
-      time: new Date().toISOString(),
-      error: null
-    });
-
-    log("Withdrawal submitted:", result);
-    await refreshQueues();
-    startPolling();
   } catch (error) {
     appendHistory({
       type: "withdraw-submit",
@@ -982,52 +1025,51 @@ els.withdraw.addEventListener("click", async () => {
 
 els.claimNextDeposit.addEventListener("click", async () => {
   try {
-    requireConnected();
-    requireBridge();
+    await runBridgeAction("deposit finalization", async () => {
+      requireConnected();
+      await ensureBridgeInitialized();
+      requireBridge();
 
-    await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction();
 
-    const caps = uiState.depositCapabilities;
-    const nextClaimable = pickNextClaimableDeposit(uiState.depositState);
+      const caps = uiState.depositCapabilities;
+      const nextClaimable = pickNextClaimableDeposit(uiState.depositState);
 
-    if (!caps?.canFinalize || !nextClaimable) {
-      log("No claimable deposit available after refresh.");
-      return;
-    }
+      if (!caps?.canFinalize || !nextClaimable) {
+        log("No claimable deposit available after refresh.");
+        return;
+      }
 
-    const fee = els.fee.value;
+      const fee = els.fee.value;
+      const signTransaction = createWalletTransactionSigner({
+        fee,
+        memo: "zeko-finalize-deposit",
+        requiredNetwork: L2_NETWORK_ID
+      });
 
-    log("Claiming next eligible deposit...", {
-      sdkTargetIndex: nextClaimable.index,
-      amount: nextClaimable.amount.toString(),
-      hash: nextClaimable.hash
+      log("Claiming next eligible deposit...", {
+        sdkTargetIndex: nextClaimable.index,
+        amount: nextClaimable.amount.toString(),
+        hash: nextClaimable.hash
+      });
+
+      const result = await buildFinalizeDepositTx(bridge, account, fee, signTransaction);
+      const hash = extractBridgeResultHash(result);
+
+      appendHistory({
+        type: "deposit-claim-next",
+        status: "submitted",
+        hash,
+        amount: formatMinaFromNanoLike(nextClaimable.amount.toString()),
+        fee,
+        memo: "zeko-finalize-deposit",
+        time: new Date().toISOString(),
+        error: null
+      });
+
+      log("Claim next eligible deposit submitted:", result);
+      await refreshQueues();
     });
-
-    const tx = await buildFinalizeDepositTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-finalize-deposit", {
-      requiredNetwork: L2_NETWORK_ID
-    });
-
-    const hash =
-      result?.hash ||
-      result?.transactionHash ||
-      result?.txHash ||
-      result?.id ||
-      null;
-
-    appendHistory({
-      type: "deposit-claim-next",
-      status: "submitted",
-      hash,
-      amount: formatMinaFromNanoLike(nextClaimable.amount.toString()),
-      fee,
-      memo: "zeko-finalize-deposit",
-      time: new Date().toISOString(),
-      error: null
-    });
-
-    log("Claim next eligible deposit submitted:", result);
-    await refreshQueues();
   } catch (error) {
     const message = error?.message || String(error);
 
@@ -1059,52 +1101,51 @@ els.claimNextDeposit.addEventListener("click", async () => {
 
 els.cancelNextDeposit.addEventListener("click", async () => {
   try {
-    requireConnected();
-    requireBridge();
+    await runBridgeAction("deposit cancellation", async () => {
+      requireConnected();
+      await ensureBridgeInitialized();
+      requireBridge();
 
-    await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction();
 
-    const caps = uiState.depositCapabilities;
-    const nextCancellable = pickNextCancellableDeposit(uiState.depositState);
+      const caps = uiState.depositCapabilities;
+      const nextCancellable = pickNextCancellableDeposit(uiState.depositState);
 
-    if (!caps?.canCancel || !nextCancellable) {
-      log("No cancellable deposit available after refresh.");
-      return;
-    }
+      if (!caps?.canCancel || !nextCancellable) {
+        log("No cancellable deposit available after refresh.");
+        return;
+      }
 
-    const fee = els.fee.value;
+      const fee = els.fee.value;
+      const signTransaction = createWalletTransactionSigner({
+        fee,
+        memo: "zeko-cancel-deposit",
+        requiredNetwork: L1_NETWORK_ID
+      });
 
-    log("Cancelling next eligible deposit...", {
-      sdkTargetIndex: nextCancellable.index,
-      amount: nextCancellable.amount.toString(),
-      hash: nextCancellable.hash
+      log("Cancelling next eligible deposit...", {
+        sdkTargetIndex: nextCancellable.index,
+        amount: nextCancellable.amount.toString(),
+        hash: nextCancellable.hash
+      });
+
+      const result = await buildCancelDepositTx(bridge, account, fee, signTransaction);
+      const hash = extractBridgeResultHash(result);
+
+      appendHistory({
+        type: "deposit-cancel-next",
+        status: "submitted",
+        hash,
+        amount: formatMinaFromNanoLike(nextCancellable.amount.toString()),
+        fee,
+        memo: "zeko-cancel-deposit",
+        time: new Date().toISOString(),
+        error: null
+      });
+
+      log("Cancel next eligible deposit submitted:", result);
+      await refreshQueues();
     });
-
-    const tx = await buildCancelDepositTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-cancel-deposit", {
-      requiredNetwork: L1_NETWORK_ID
-    });
-
-    const hash =
-      result?.hash ||
-      result?.transactionHash ||
-      result?.txHash ||
-      result?.id ||
-      null;
-
-    appendHistory({
-      type: "deposit-cancel-next",
-      status: "submitted",
-      hash,
-      amount: formatMinaFromNanoLike(nextCancellable.amount.toString()),
-      fee,
-      memo: "zeko-cancel-deposit",
-      time: new Date().toISOString(),
-      error: null
-    });
-
-    log("Cancel next eligible deposit submitted:", result);
-    await refreshQueues();
   } catch (error) {
     const message = error?.message || String(error);
 
@@ -1136,52 +1177,51 @@ els.cancelNextDeposit.addEventListener("click", async () => {
 
 els.finalizeNextWithdrawal.addEventListener("click", async () => {
   try {
-    requireConnected();
-    requireBridge();
+    await runBridgeAction("withdrawal finalization", async () => {
+      requireConnected();
+      await ensureBridgeInitialized();
+      requireBridge();
 
-    await safelyRefreshBeforeAction();
+      await safelyRefreshBeforeAction();
 
-    const caps = uiState.withdrawalCapabilities;
-    const nextFinalizable = pickNextFinalizableWithdrawal(uiState.withdrawalState);
+      const caps = uiState.withdrawalCapabilities;
+      const nextFinalizable = pickNextFinalizableWithdrawal(uiState.withdrawalState);
 
-    if (!caps?.canFinalize || !nextFinalizable) {
-      log("No finalizable withdrawal available after refresh.");
-      return;
-    }
+      if (!caps?.canFinalize || !nextFinalizable) {
+        log("No finalizable withdrawal available after refresh.");
+        return;
+      }
 
-    const fee = els.fee.value;
+      const fee = els.fee.value;
+      const signTransaction = createWalletTransactionSigner({
+        fee,
+        memo: "zeko-finalize-withdrawal",
+        requiredNetwork: L1_NETWORK_ID
+      });
 
-    log("Finalizing next eligible withdrawal...", {
-      sdkTargetIndex: nextFinalizable.index,
-      amount: nextFinalizable.amount.toString(),
-      hash: nextFinalizable.hash
+      log("Finalizing next eligible withdrawal...", {
+        sdkTargetIndex: nextFinalizable.index,
+        amount: nextFinalizable.amount.toString(),
+        hash: nextFinalizable.hash
+      });
+
+      const result = await buildFinalizeWithdrawalTx(bridge, account, fee, signTransaction);
+      const hash = extractBridgeResultHash(result);
+
+      appendHistory({
+        type: "withdraw-finalize-next",
+        status: "submitted",
+        hash,
+        amount: formatMinaFromNanoLike(nextFinalizable.amount.toString()),
+        fee,
+        memo: "zeko-finalize-withdrawal",
+        time: new Date().toISOString(),
+        error: null
+      });
+
+      log("Finalize next eligible withdrawal submitted:", result);
+      await refreshQueues();
     });
-
-    const tx = await buildFinalizeWithdrawalTx(bridge, account, fee);
-    const result = await sendTransaction(tx, fee, "zeko-finalize-withdrawal", {
-      requiredNetwork: L1_NETWORK_ID
-    });
-
-    const hash =
-      result?.hash ||
-      result?.transactionHash ||
-      result?.txHash ||
-      result?.id ||
-      null;
-
-    appendHistory({
-      type: "withdraw-finalize-next",
-      status: "submitted",
-      hash,
-      amount: formatMinaFromNanoLike(nextFinalizable.amount.toString()),
-      fee,
-      memo: "zeko-finalize-withdrawal",
-      time: new Date().toISOString(),
-      error: null
-    });
-
-    log("Finalize next eligible withdrawal submitted:", result);
-    await refreshQueues();
   } catch (error) {
     const message = error?.message || String(error);
 
@@ -1321,6 +1361,7 @@ window.addEventListener("resize", updateDesktopScale);
     const existing = await getConnectedAccount();
     if (existing) {
       account = existing;
+      renderTopStatus();
       log("Wallet already connected:", existing);
 
       await initializeBridge();
