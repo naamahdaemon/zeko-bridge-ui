@@ -291,54 +291,68 @@ export async function submitDepositTx(bridge, account, amount, fee, signTransact
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
-  return await withVerificationKeyDiagnostics(
-    "submitDeposit",
-    config.l1Url,
-    [
-      { label: "outerPk", publicKey: bridge.outerPk, endpoint: config.l1Url },
-      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: config.l1Url }
-    ],
-    () =>
-      bridge.submitDeposit(
-        {
-          sender: PublicKey.fromBase58(account),
-          fee: toNanoFee(fee)
-        },
-        {
-          recipient: PublicKey.fromBase58(account),
-          amount: UInt64.from(toNano(amount)),
-          timeout: UInt32.MAXINT(),
-          holderAccountL1: bridge.outerHolders[0]
-        },
-        signTransaction
-      )
-  );
+  try {
+    return await withVerificationKeyDiagnostics(
+      "submitDeposit",
+      config.l1Url,
+      [
+        { label: "outerPk", publicKey: bridge.outerPk, endpoint: config.l1Url },
+        { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: config.l1Url }
+      ],
+      () =>
+        bridge.submitDeposit(
+          {
+            sender: PublicKey.fromBase58(account),
+            fee: toNanoFee(fee)
+          },
+          {
+            recipient: PublicKey.fromBase58(account),
+            amount: UInt64.from(toNano(amount)),
+            timeout: UInt32.MAXINT(),
+            holderAccountL1: bridge.outerHolders[0]
+          },
+          signTransaction
+        )
+    );
+  } catch (error) {
+    const message = error?.message || String(error);
+    throw new Error(
+      `submitDeposit failed on ${getCurrentBridgePreset().label} (l1=${config.l1Url}, l2=${config.zekoUrl}): ${message}`
+    );
+  }
 }
 
 export async function submitWithdrawalTx(bridge, account, amount, fee, signTransaction) {
   const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
 
-  return await withVerificationKeyDiagnostics(
-    "submitWithdrawal",
-    config.zekoUrl,
-    [
-      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: config.zekoUrl },
-      { label: "innerPk", publicKey: bridge.innerPk, endpoint: config.zekoUrl }
-    ],
-    () =>
-      bridge.submitWithdrawal(
-        {
-          sender: PublicKey.fromBase58(account),
-          fee: toNanoFee(fee)
-        },
-        {
-          recipient: PublicKey.fromBase58(account),
-          amount: UInt64.from(toNano(amount))
-        },
-        signTransaction
-      )
-  );
+  try {
+    return await withVerificationKeyDiagnostics(
+      "submitWithdrawal",
+      config.zekoUrl,
+      [
+        { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: config.zekoUrl },
+        { label: "innerPk", publicKey: bridge.innerPk, endpoint: config.zekoUrl }
+      ],
+      () =>
+        bridge.submitWithdrawal(
+          {
+            sender: PublicKey.fromBase58(account),
+            fee: toNanoFee(fee)
+          },
+          {
+            recipient: PublicKey.fromBase58(account),
+            amount: UInt64.from(toNano(amount))
+          },
+          signTransaction
+        )
+    );
+  } catch (error) {
+    const message = error?.message || String(error);
+    throw new Error(
+      `submitWithdrawal failed on ${getCurrentBridgePreset().label} (l2=${config.zekoUrl}): ${message}`
+    );
+  }
 }
 
 export async function fetchDepositStates(bridge, account) {
