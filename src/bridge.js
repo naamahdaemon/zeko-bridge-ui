@@ -9,8 +9,8 @@ export const BRIDGE_NETWORK_PRESETS = {
     l1WalletNetwork: "mina:mainnet",
     l2WalletNetwork: "zeko:mainnet",
     config: {
-      l1Url: "https://api.minascan.io/node/mainnet/v1/graphql",
-      l1ArchiveUrl: "https://api.minascan.io/archive/mainnet/v1/graphql",
+      l1Url: "https://gateway.mina.mainnet.zeko.io/",
+      l1ArchiveUrl: "https://gateway.mina.archive.mainnet.zeko.io/",
       actionsApi: "https://api.actions.zeko.io/graphql",
       zekoUrl: "https://mainnet.zeko.io/graphql",
       zekoArchiveUrl: "https://archive.mainnet.zeko.io/graphql",
