@@ -526,6 +526,10 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   max-height: none;
 }
 
+.card.is-fullscreen .local-history-list {
+  max-height: none;
+}
+
 .actions {
   display: flex;
   gap: 12px;
@@ -620,6 +624,12 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.local-history-list {
+  max-height: 480px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .queue-item {
