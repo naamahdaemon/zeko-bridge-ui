@@ -691,6 +691,13 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   color: var(--ok);
 }
 
+.badge.claimable {
+  border-color: rgba(8, 145, 178, 0.32);
+  background: rgba(8, 145, 178, 0.1);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .badge.warn {
   border-color: rgba(180, 83, 9, 0.32);
   color: var(--warn);

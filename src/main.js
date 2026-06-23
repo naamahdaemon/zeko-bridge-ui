@@ -872,9 +872,10 @@ function estimateWithdrawalLabel(withdrawal) {
   return "Waiting for bridge commit";
 }
 
-function estimateDepositLabel(deposit) {
+function estimateDepositLabel(deposit, isClaimableNow = false) {
   if (deposit.finalised) return "Claimed";
   if (deposit.cancelled) return "Canceled";
+  if (isClaimableNow) return "Claimable now";
   if (deposit.confirmed) return "Ready to claim";
 
   const delayMs = getBridgeDelayMs();
@@ -910,15 +911,21 @@ function renderTopStatus() {
   }
 }
 
-function pickNextClaimableDeposit(state) {
-  if (!state?.deposits?.length) return null;
+function pickNextClaimableDeposit(state, caps = uiState.depositCapabilities) {
+  if (!state?.deposits?.length || !caps?.canFinalize) return null;
+
+  if (Number.isInteger(caps?.finalizeIndex)) {
+    return state.deposits.find((d) => d.index === caps.finalizeIndex) ?? null;
+  }
+
   return [...state.deposits]
     .filter((d) => d.confirmed && !d.finalised && !d.cancelled)
     .sort((a, b) => a.index - b.index)[0] ?? null;
 }
 
-function pickNextCancellableDeposit(state) {
-  if (!state?.deposits?.length) return null;
+function pickNextCancellableDeposit(state, caps = uiState.depositCapabilities) {
+  if (!state?.deposits?.length || !caps?.canCancel) return null;
+
   return [...state.deposits]
     .filter((d) => !d.accepted && !d.cancelled && !d.finalised)
     .sort((a, b) => a.index - b.index)[0] ?? null;
@@ -1011,8 +1018,8 @@ function renderSummaryGrid(container, items) {
 function renderDepositQueue() {
   const state = uiState.depositState;
   const caps = uiState.depositCapabilities;
-  const nextClaimable = pickNextClaimableDeposit(state);
-  const nextCancellable = pickNextCancellableDeposit(state);
+  const nextClaimable = pickNextClaimableDeposit(state, caps);
+  const nextCancellable = pickNextCancellableDeposit(state, caps);
 
   els.nextClaimableDeposit.textContent = nextClaimable
     ? `index ${nextClaimable.index} • ${formatMinaFromNanoLike(nextClaimable.amount.toString())} MINA`
@@ -1054,6 +1061,7 @@ function renderDepositQueue() {
       const amount = d.amount?.toString?.() ?? String(d.amount);
       const timeout = d.timeout?.toString?.() ?? String(d.timeout);
       const holder = d.holderAccountL1?.toBase58?.() ?? String(d.holderAccountL1);
+      const isClaimableNow = caps?.canFinalize && d.index === nextClaimableIndex;
 
       const isNextAction = d.index === nextClaimableIndex || d.index === nextCancellableIndex;
       const isDone = d.finalised || d.cancelled;
@@ -1082,10 +1090,11 @@ function renderDepositQueue() {
             <div><strong>Timeout:</strong> ${timeout}</div>
               <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
             <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
-            <div><strong>Estimate:</strong> ${estimateDepositLabel(d)}</div>
+            <div><strong>Estimate:</strong> ${estimateDepositLabel(d, isClaimableNow)}</div>
           </div>
 
           <div class="queue-badges">
+            ${isClaimableNow ? '<span class="badge claimable">claimable now</span>' : ""}
             <span class="badge ${d.synced ? "ok" : "dim"}">synced: ${d.synced}</span>
             <span class="badge ${d.accepted ? "ok" : "warn"}">accepted: ${d.accepted}</span>
             <span class="badge ${d.confirmed ? "ok" : "dim"}">confirmed: ${d.confirmed}</span>
@@ -1606,7 +1615,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
       await safelyRefreshBeforeAction(actionGeneration);
 
       const caps = uiState.depositCapabilities;
-      const nextClaimable = pickNextClaimableDeposit(uiState.depositState);
+      const nextClaimable = pickNextClaimableDeposit(uiState.depositState, caps);
 
       if (!caps?.canFinalize || !nextClaimable) {
         log("No claimable deposit available after refresh.");
@@ -1694,7 +1703,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
       await safelyRefreshBeforeAction(actionGeneration);
 
       const caps = uiState.depositCapabilities;
-      const nextCancellable = pickNextCancellableDeposit(uiState.depositState);
+      const nextCancellable = pickNextCancellableDeposit(uiState.depositState, caps);
 
       if (!caps?.canCancel || !nextCancellable) {
         log("No cancellable deposit available after refresh.");

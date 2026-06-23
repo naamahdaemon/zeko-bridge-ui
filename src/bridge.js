@@ -390,6 +390,7 @@ export async function getDepositCapabilities(bridge, account) {
   return {
     canFinalize: Boolean(finalizeResult?.available),
     finalizeReason: finalizeResult?.reason ?? null,
+    finalizeIndex: Number.isFinite(Number(finalizeResult?.index)) ? Number(finalizeResult.index) : null,
     canCancel: Boolean(cancelResult?.available),
     cancelReason: cancelResult?.reason ?? null
   };
