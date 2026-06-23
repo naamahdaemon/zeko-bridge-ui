@@ -1,6 +1,10 @@
-import { connectWallet, createWalletTransactionSigner, getConnectedAccount } from "./wallet.js";
+import { connectWallet, createWalletTransactionSigner, getConnectedAccount, getCurrentNetwork } from "./wallet.js";
 import {
+  getBridgeNetworkOptions,
+  getCurrentBridgeNetworkId,
+  getCurrentBridgePreset,
   initBridge,
+  setBridgeNetwork,
   submitDepositTx,
   submitWithdrawalTx,
   fetchDepositStates,
@@ -16,23 +20,29 @@ const STORAGE_KEY = "zeko-bridge-ui:v2";
 const POLL_INTERVAL_MS = 15000;
 const POLLING_DRAIN_TIMEOUT_MS = 30000;
 const SLOT_DURATION_MS = 180000;
-const L1_NETWORK_ID = "mina:devnet";
-const L2_NETWORK_ID = "zeko:testnet";
 const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
 const DESKTOP_BASE_WIDTH = 1180;
+const BRIDGE_NETWORK_SELECTION_AUTO = "auto";
+const BRIDGE_NETWORK_SELECTION_MANUAL = "manual";
+const ACTION_STATUS_HIDE_DELAY_MS = 8000;
+const ACTION_STATUS_AUTO_REDUCE_BOTTOM_THRESHOLD_PX = 140;
 
 const els = {
   connect: document.getElementById("connect"),
   toggleDesktopMode: document.getElementById("toggleDesktopMode"),
   desktopModeIcon: document.getElementById("desktopModeIcon"),
+  actionStatusIndicator: document.getElementById("actionStatusIndicator"),
+  actionStatusIndicatorGlyph: document.getElementById("actionStatusIndicatorGlyph"),
   toggleThemeMode: document.getElementById("toggleThemeMode"),
   themeModeIcon: document.getElementById("themeModeIcon"),
   account: document.getElementById("account"),
+  walletNetwork: document.getElementById("walletNetwork"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
   fee: document.getElementById("fee"),
   deposit: document.getElementById("deposit"),
   withdraw: document.getElementById("withdraw"),
+  bridgeNetwork: document.getElementById("bridgeNetwork"),
 
   refreshState: document.getElementById("refreshState"),
   startPolling: document.getElementById("startPolling"),
@@ -59,6 +69,17 @@ const els = {
   clearHistory: document.getElementById("clearHistory"),
   localHistory: document.getElementById("localHistory"),
 
+  actionStatus: document.getElementById("actionStatus"),
+  actionStatusPill: document.getElementById("actionStatusPill"),
+  actionStatusTitle: document.getElementById("actionStatusTitle"),
+  actionStatusDetail: document.getElementById("actionStatusDetail"),
+  actionStatusProgress: document.getElementById("actionStatusProgress"),
+  actionStatusElapsed: document.getElementById("actionStatusElapsed"),
+  actionStatusHint: document.getElementById("actionStatusHint"),
+  actionStatusClose: document.getElementById("actionStatusClose"),
+  actionStatusReduced: document.getElementById("actionStatusReduced"),
+  actionStatusReducedText: document.getElementById("actionStatusReducedText"),
+
   log: document.getElementById("log")
 };
 
@@ -68,12 +89,29 @@ let pollTimer = null;
 let pollingInFlight = false;
 let actionInFlight = false;
 let refreshGeneration = 0;
+let bridgeNetworkGeneration = 0;
 let fullscreenCardId = null;
 let forceDesktopMode = false;
 let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
 let orderedCardIds = [];
 let touchGestureStart = null;
 let pointerGestureStart = null;
+let walletNetwork = null;
+let actionStatusTickTimer = null;
+let actionStatusHideTimer = null;
+let backgroundStatusShowTimer = null;
+
+const actionStatusState = {
+  visible: false,
+  dismissed: false,
+  owner: null,
+  tone: "working",
+  label: "Action in progress",
+  title: "",
+  detail: "",
+  hint: "Live updates are shown here while the SDK is working.",
+  startedAt: null
+};
 
 const ICONS = {
   mobile: `
@@ -117,6 +155,287 @@ function log(...args) {
   els.log.textContent = `${new Date().toISOString()} ${line}\n${els.log.textContent}`;
 }
 
+function formatElapsedMs(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function clearActionStatusHideTimer() {
+  if (!actionStatusHideTimer) return;
+  clearTimeout(actionStatusHideTimer);
+  actionStatusHideTimer = null;
+}
+
+function clearBackgroundStatusShowTimer() {
+  if (!backgroundStatusShowTimer) return;
+  clearTimeout(backgroundStatusShowTimer);
+  backgroundStatusShowTimer = null;
+}
+
+function stopActionStatusTicking() {
+  if (!actionStatusTickTimer) return;
+  clearInterval(actionStatusTickTimer);
+  actionStatusTickTimer = null;
+}
+
+function ensureActionStatusTicking() {
+  if (actionStatusTickTimer || !actionStatusState.startedAt || !actionStatusState.owner) {
+    return;
+  }
+
+  actionStatusTickTimer = setInterval(() => {
+    renderActionStatus();
+  }, 1000);
+}
+
+function getActionStatusTooltip() {
+  if (!actionStatusState.owner) {
+    return "No action in progress";
+  }
+
+  const parts = [actionStatusState.title, actionStatusState.detail].filter(Boolean);
+  return parts.join(" - ") || "Action status";
+}
+
+function renderActionStatusIndicator() {
+  if (!els.actionStatusIndicator) return;
+
+  const isBusy = Boolean(actionStatusState.owner) && actionStatusState.tone === "working";
+  const tooltip = getActionStatusTooltip();
+
+  els.actionStatusIndicator.classList.toggle("is-busy", isBusy);
+  els.actionStatusIndicator.classList.toggle("is-available", Boolean(actionStatusState.owner));
+  els.actionStatusIndicator.setAttribute("aria-disabled", String(!actionStatusState.owner));
+  els.actionStatusIndicator.setAttribute(
+    "aria-label",
+    isBusy ? `Open action status: ${tooltip}` : tooltip
+  );
+  els.actionStatusIndicator.title = tooltip;
+
+  if (els.actionStatusIndicatorGlyph) {
+    els.actionStatusIndicatorGlyph.classList.toggle("is-spinning", isBusy);
+  }
+}
+
+function getReducedActionStatusText() {
+  const elapsed = actionStatusState.startedAt
+    ? `Elapsed: ${formatElapsedMs(Date.now() - actionStatusState.startedAt)}`
+    : "Elapsed: 0s";
+  const message = actionStatusState.detail || actionStatusState.title || "Waiting for the next step...";
+  return `${elapsed} - ${message}`;
+}
+
+function renderActionStatus() {
+  if (!els.actionStatus || !els.actionStatusReduced) return;
+
+  const hasOwner = Boolean(actionStatusState.owner);
+  const showExpanded = hasOwner && actionStatusState.visible;
+  const showReduced = hasOwner && !actionStatusState.visible;
+
+  els.actionStatus.hidden = !showExpanded;
+  els.actionStatusReduced.hidden = !showReduced;
+  document.body.classList.toggle("has-reduced-status", showReduced);
+
+  if (!hasOwner) {
+    stopActionStatusTicking();
+    renderActionStatusIndicator();
+    return;
+  }
+
+  if (showExpanded) {
+    els.actionStatus.dataset.tone = actionStatusState.tone;
+    els.actionStatusPill.textContent = actionStatusState.label;
+    els.actionStatusTitle.textContent = actionStatusState.title;
+    els.actionStatusDetail.textContent = actionStatusState.detail;
+    els.actionStatusHint.textContent = actionStatusState.hint;
+    els.actionStatusElapsed.textContent = actionStatusState.startedAt
+      ? `Elapsed: ${formatElapsedMs(Date.now() - actionStatusState.startedAt)}`
+      : "Elapsed: 0s";
+  }
+
+  if (showReduced) {
+    els.actionStatusReduced.dataset.tone = actionStatusState.tone;
+    els.actionStatusReducedText.textContent = getReducedActionStatusText();
+  }
+
+  if (actionStatusState.startedAt) {
+    ensureActionStatusTicking();
+  } else {
+    stopActionStatusTicking();
+  }
+
+  renderActionStatusIndicator();
+}
+
+function resetActionStatus() {
+  clearActionStatusHideTimer();
+  clearBackgroundStatusShowTimer();
+  stopActionStatusTicking();
+  actionStatusState.visible = false;
+  actionStatusState.dismissed = false;
+  actionStatusState.owner = null;
+  actionStatusState.startedAt = null;
+  renderActionStatus();
+}
+
+function dismissActionStatus() {
+  clearActionStatusHideTimer();
+  clearBackgroundStatusShowTimer();
+  actionStatusState.visible = false;
+  actionStatusState.dismissed = true;
+  renderActionStatus();
+}
+
+function scheduleActionStatusHide(delayMs = ACTION_STATUS_HIDE_DELAY_MS) {
+  clearActionStatusHideTimer();
+  actionStatusHideTimer = setTimeout(() => {
+    resetActionStatus();
+  }, delayMs);
+}
+
+function beginActionStatus(title, detail, hint = "Live updates are shown here while the SDK is working.") {
+  clearBackgroundStatusShowTimer();
+  clearActionStatusHideTimer();
+  actionStatusState.visible = true;
+  actionStatusState.dismissed = false;
+  actionStatusState.owner = "action";
+  actionStatusState.tone = "working";
+  actionStatusState.label = "Action in progress";
+  actionStatusState.title = title;
+  actionStatusState.detail = detail;
+  actionStatusState.hint = hint;
+  actionStatusState.startedAt = Date.now();
+  renderActionStatus();
+}
+
+function updateActionStatus(detail, hint = actionStatusState.hint) {
+  if (actionStatusState.owner !== "action") return;
+  actionStatusState.detail = detail;
+  actionStatusState.hint = hint;
+  renderActionStatus();
+}
+
+function finishActionStatus(tone, detail, hint, hideDelayMs = ACTION_STATUS_HIDE_DELAY_MS) {
+  if (!actionStatusState.owner) return;
+  actionStatusState.tone = tone;
+  actionStatusState.label = tone === "success" ? "Action complete" : "Action failed";
+  actionStatusState.detail = detail;
+  actionStatusState.hint = hint;
+  if (tone === "error") {
+    actionStatusState.visible = true;
+    actionStatusState.dismissed = false;
+  }
+  renderActionStatus();
+  scheduleActionStatusHide(hideDelayMs);
+}
+
+function completeActionStatus(detail, hint = "The UI will keep polling and update queue state when new data arrives.") {
+  finishActionStatus("success", detail, hint);
+}
+
+function failActionStatus(detail, hint = "Check the activity log below if you need the full technical error.") {
+  finishActionStatus("error", detail, hint);
+}
+
+function beginBackgroundStatus(
+  title,
+  detail,
+  hint = "Background bridge sync is running. You can still submit a new action if needed.",
+  { delayMs = 0 } = {}
+) {
+  if (actionInFlight) return;
+
+  const show = () => {
+    if (actionInFlight) return;
+    clearActionStatusHideTimer();
+    actionStatusState.visible = true;
+    actionStatusState.dismissed = false;
+    actionStatusState.owner = "background";
+    actionStatusState.tone = "working";
+    actionStatusState.label = "Background sync";
+    actionStatusState.title = title;
+    actionStatusState.detail = detail;
+    actionStatusState.hint = hint;
+    actionStatusState.startedAt = Date.now();
+    renderActionStatus();
+  };
+
+  clearBackgroundStatusShowTimer();
+  if (delayMs > 0) {
+    backgroundStatusShowTimer = setTimeout(() => {
+      backgroundStatusShowTimer = null;
+      show();
+    }, delayMs);
+    return;
+  }
+
+  show();
+}
+
+function updateBackgroundStatus(detail, hint = actionStatusState.hint) {
+  if (actionStatusState.owner !== "background") return;
+  actionStatusState.detail = detail;
+  actionStatusState.hint = hint;
+  renderActionStatus();
+}
+
+function completeBackgroundStatus(
+  detail,
+  hint = "The latest bridge state has been loaded.",
+  hideDelayMs = 2200
+) {
+  clearBackgroundStatusShowTimer();
+  if (actionStatusState.owner !== "background") return;
+  finishActionStatus("success", detail, hint, hideDelayMs);
+}
+
+function failBackgroundStatus(
+  detail,
+  hint = "Background sync hit an error. You can still inspect the log or try a manual refresh.",
+  hideDelayMs = ACTION_STATUS_HIDE_DELAY_MS
+) {
+  clearBackgroundStatusShowTimer();
+  if (actionStatusState.owner !== "background") return;
+  finishActionStatus("error", detail, hint, hideDelayMs);
+}
+
+function updateVisibleStatus(detail, hint = actionStatusState.hint) {
+  if (!actionStatusState.owner) return;
+
+  if (actionStatusState.owner === "action") {
+    updateActionStatus(detail, hint);
+    return;
+  }
+
+  if (actionStatusState.owner === "background") {
+    updateBackgroundStatus(detail, hint);
+  }
+}
+
+function revealActionStatus() {
+  if (!actionStatusState.owner) return;
+  actionStatusState.visible = true;
+  actionStatusState.dismissed = false;
+  renderActionStatus();
+}
+
+function maybeAutoReduceActionStatus() {
+  if (!actionStatusState.owner || !actionStatusState.visible) return;
+
+  const scrollTop = window.scrollY || window.pageYOffset || 0;
+  const viewportBottom = scrollTop + window.innerHeight;
+  const documentHeight = Math.max(
+    document.body.scrollHeight,
+    document.documentElement.scrollHeight
+  );
+
+  if (viewportBottom >= documentHeight - ACTION_STATUS_AUTO_REDUCE_BOTTOM_THRESHOLD_PX) {
+    dismissActionStatus();
+  }
+}
+
 function requireConnected() {
   if (!account) throw new Error("Wallet is not connected.");
 }
@@ -137,6 +456,35 @@ function saveState(next) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
+function formatWalletNetwork(networkId) {
+  const labels = {
+    "mina:devnet": "Mina Devnet",
+    "mina:testnet": "Mina Testnet",
+    "mina:mainnet": "Mina Mainnet",
+    "zeko:testnet": "Zeko Testnet",
+    "zeko:mainnet": "Zeko Mainnet"
+  };
+
+  return labels[networkId] ?? networkId ?? "Unknown";
+}
+
+async function refreshWalletNetwork() {
+  if (!account) {
+    walletNetwork = null;
+    renderTopStatus();
+    return null;
+  }
+
+  try {
+    walletNetwork = await getCurrentNetwork();
+  } catch {
+    walletNetwork = null;
+  }
+
+  renderTopStatus();
+  return walletNetwork;
+}
+
 function loadPreferences() {
   const s = loadState();
   return s.preferences && typeof s.preferences === "object" ? s.preferences : {};
@@ -145,6 +493,25 @@ function loadPreferences() {
 function savePreferences(preferences) {
   const s = loadState();
   saveState({ ...s, preferences: { ...loadPreferences(), ...preferences } });
+}
+
+function getBridgeNetworkSelectionMode() {
+  const mode = loadPreferences().bridgeNetworkSelectionMode;
+  return mode === BRIDGE_NETWORK_SELECTION_MANUAL
+    ? BRIDGE_NETWORK_SELECTION_MANUAL
+    : BRIDGE_NETWORK_SELECTION_AUTO;
+}
+
+function populateBridgeNetworkSelector() {
+  if (!els.bridgeNetwork) return;
+
+  const currentNetworkId = getCurrentBridgeNetworkId();
+  els.bridgeNetwork.innerHTML = getBridgeNetworkOptions()
+    .map(
+      ({ id, label }) =>
+        `<option value="${escapeHtml(id)}"${id === currentNetworkId ? " selected" : ""}>${escapeHtml(label)}</option>`
+    )
+    .join("");
 }
 
 function getStoredHistory() {
@@ -168,6 +535,18 @@ function clearHistory() {
   const s = loadState();
   saveState({ ...s, history: [] });
   renderLocalHistory();
+}
+
+function mapWalletNetworkToBridgeNetwork(networkId) {
+  const mapping = {
+    "mina:devnet": "testnet",
+    "mina:testnet": "testnet",
+    "zeko:testnet": "testnet",
+    "mina:mainnet": "mainnet",
+    "zeko:mainnet": "mainnet"
+  };
+
+  return mapping[networkId] ?? null;
 }
 
 function isDesktopLayout() {
@@ -519,10 +898,16 @@ function estimateDepositLabel(deposit) {
 
 function renderTopStatus() {
   els.account.textContent = account || "Not connected";
+  if (els.walletNetwork) {
+    els.walletNetwork.textContent = account ? formatWalletNetwork(walletNetwork) : "Unknown";
+  }
   els.connectionStatus.textContent = account ? "Wallet connected" : "Wallet disconnected";
   els.connectionStatus.classList.toggle("connected", Boolean(account));
   els.pollingStatus.textContent = pollTimer ? "Running" : "Stopped";
   els.lastRefresh.textContent = formatDateTime(uiState.lastRefreshAt);
+  if (els.bridgeNetwork) {
+    els.bridgeNetwork.value = getCurrentBridgeNetworkId();
+  }
 }
 
 function pickNextClaimableDeposit(state) {
@@ -565,6 +950,50 @@ const uiState = {
   withdrawalCapabilities: null,
   lastRefreshAt: null
 };
+
+function resetQueueState() {
+  uiState.depositState = null;
+  uiState.depositCapabilities = null;
+  uiState.withdrawalState = null;
+  uiState.withdrawalCapabilities = null;
+  uiState.lastRefreshAt = null;
+  renderAll();
+}
+
+function applyBridgeNetworkLocally(nextNetworkId, { selectionMode } = {}) {
+  bridgeNetworkGeneration += 1;
+  refreshGeneration += 1;
+  bridge = null;
+  setBridgeNetwork(nextNetworkId);
+  const preferenceUpdate = { bridgeNetwork: nextNetworkId };
+  if (selectionMode) {
+    preferenceUpdate.bridgeNetworkSelectionMode = selectionMode;
+  }
+  savePreferences(preferenceUpdate);
+  populateBridgeNetworkSelector();
+  resetQueueState();
+  renderTopStatus();
+}
+
+function alignBridgeNetworkToWalletIfNeeded() {
+  if (!walletNetwork) return false;
+  if (getBridgeNetworkSelectionMode() === BRIDGE_NETWORK_SELECTION_MANUAL) {
+    return false;
+  }
+
+  const inferredBridgeNetwork = mapWalletNetworkToBridgeNetwork(walletNetwork);
+  if (!inferredBridgeNetwork || inferredBridgeNetwork === getCurrentBridgeNetworkId()) {
+    return false;
+  }
+
+  applyBridgeNetworkLocally(inferredBridgeNetwork, {
+    selectionMode: BRIDGE_NETWORK_SELECTION_AUTO
+  });
+  log(
+    `Aligned bridge network to ${getCurrentBridgePreset().label} from wallet network ${formatWalletNetwork(walletNetwork)}.`
+  );
+  return true;
+}
 
 function renderSummaryGrid(container, items) {
   container.innerHTML = items
@@ -772,6 +1201,7 @@ function renderAll() {
   renderDepositQueue();
   renderWithdrawalQueue();
   renderLocalHistory();
+  renderActionStatus();
 }
 
 function extractBridgeResultHash(result) {
@@ -786,23 +1216,34 @@ function extractBridgeResultHash(result) {
   );
 }
 
-async function initializeBridge() {
-  log("Initializing bridge...");
-  bridge = await initBridge();
+async function initializeBridge({ generation = bridgeNetworkGeneration } = {}) {
+  const preset = getCurrentBridgePreset();
+  log(`Initializing bridge for ${preset.label}...`);
+  updateVisibleStatus(`Initializing the ${preset.label} bridge configuration.`);
+  const nextBridge = await initBridge();
+
+  if (generation !== bridgeNetworkGeneration) {
+    log(`Discarded stale ${preset.label} bridge initialization.`);
+    return null;
+  }
+
+  bridge = nextBridge;
   if (!bridge) throw new Error("Bridge.init returned null/undefined");
-  log("Bridge initialized");
+  log(`Bridge initialized for ${preset.label}`);
   log("outerHolders:", bridge.outerHolders ?? []);
+  return bridge;
 }
 
-async function ensureBridgeInitialized() {
-  if (bridge) return;
+async function ensureBridgeInitialized({ generation = bridgeNetworkGeneration } = {}) {
+  if (bridge) return bridge;
   requireConnected();
-  await initializeBridge();
+  return await initializeBridge({ generation });
 }
 
-async function refreshQueues({ generation = refreshGeneration } = {}) {
+async function refreshQueues({ generation = refreshGeneration, networkGeneration = bridgeNetworkGeneration } = {}) {
   requireConnected();
-  await ensureBridgeInitialized();
+  updateVisibleStatus("Refreshing bridge queue state.");
+  await ensureBridgeInitialized({ generation: networkGeneration });
   requireBridge();
 
   const [depositState, depositCapabilities, withdrawalState, withdrawalCapabilities] =
@@ -830,13 +1271,22 @@ async function refreshQueues({ generation = refreshGeneration } = {}) {
 async function pollOnce() {
   if (pollingInFlight || actionInFlight) return;
   pollingInFlight = true;
+  beginBackgroundStatus(
+    "Refreshing bridge queues",
+    "Fetching the latest deposits and withdrawals in the background.",
+    "This sync is informative only. You can still launch a deposit or withdrawal once polling is idle.",
+    { delayMs: 1400 }
+  );
 
   try {
     await refreshQueues();
+    completeBackgroundStatus("Background queue sync completed.");
   } catch (error) {
+    failBackgroundStatus(error?.message || String(error));
     log("Polling error:", error?.message || error);
     console.error(error);
   } finally {
+    clearBackgroundStatusShowTimer();
     pollingInFlight = false;
   }
 }
@@ -860,6 +1310,7 @@ function stopPolling() {
 }
 
 async function safelyRefreshBeforeAction(generation = refreshGeneration) {
+  updateActionStatus("Refreshing queue state before continuing.");
   await refreshQueues({ generation });
 }
 
@@ -867,6 +1318,7 @@ async function waitForPollingIdle(timeoutMs = POLLING_DRAIN_TIMEOUT_MS) {
   if (!pollingInFlight) return;
 
   log("Waiting for polling to finish before action...");
+  updateActionStatus("Waiting for background polling to finish.");
   const startedAt = Date.now();
 
   while (pollingInFlight) {
@@ -877,10 +1329,16 @@ async function waitForPollingIdle(timeoutMs = POLLING_DRAIN_TIMEOUT_MS) {
   }
 }
 
-async function runBridgeAction(actionName, callback) {
+async function runBridgeAction(actionName, callback, statusConfig = {}) {
   if (actionInFlight) {
     throw new Error(`Another bridge action is already in progress. Please wait before starting ${actionName}.`);
   }
+
+  beginActionStatus(
+    statusConfig.title ?? actionName,
+    statusConfig.detail ?? "Preparing the action.",
+    statusConfig.hint
+  );
 
   const shouldResumePolling = Boolean(pollTimer);
   if (shouldResumePolling) {
@@ -890,26 +1348,74 @@ async function runBridgeAction(actionName, callback) {
   refreshGeneration += 1;
   actionInFlight = true;
   try {
-    return await callback(refreshGeneration);
+    const result = await callback(refreshGeneration);
+    if (actionStatusState.visible && actionStatusState.tone === "working") {
+      completeActionStatus(`${statusConfig.title ?? actionName} completed.`);
+    }
+    return result;
   } finally {
     actionInFlight = false;
+    await refreshWalletNetwork();
     if (shouldResumePolling) {
       startPolling();
     }
   }
 }
 
+async function handleBridgeNetworkChange(nextNetworkId) {
+  if (actionInFlight) {
+    throw new Error("Cannot change bridge network while a bridge action is in progress.");
+  }
+
+  if (nextNetworkId === getCurrentBridgeNetworkId()) return;
+
+  const shouldResumePolling = Boolean(pollTimer);
+  if (shouldResumePolling) {
+    stopPolling();
+  }
+
+  applyBridgeNetworkLocally(nextNetworkId, {
+    selectionMode: BRIDGE_NETWORK_SELECTION_MANUAL
+  });
+
+  const preset = getCurrentBridgePreset();
+  log(`Switched bridge network to ${preset.label}.`);
+
+  if (!account) {
+    renderTopStatus();
+    return;
+  }
+
+  await ensureBridgeInitialized({ generation: bridgeNetworkGeneration });
+  await refreshQueues({
+    generation: refreshGeneration,
+    networkGeneration: bridgeNetworkGeneration
+  });
+
+  if (shouldResumePolling) {
+    startPolling();
+  }
+}
+
 els.connect.addEventListener("click", async () => {
   try {
+    beginBackgroundStatus(
+      "Connecting wallet",
+      "Connecting the wallet, initializing the bridge, and loading your queue.",
+      "This can take a moment the first time because the bridge configuration and queue state must be loaded."
+    );
     account = await connectWallet();
-    renderTopStatus();
+    await refreshWalletNetwork();
+    alignBridgeNetworkToWalletIfNeeded();
     log("Connected:", account);
 
-    await initializeBridge();
+    await ensureBridgeInitialized();
     await refreshQueues();
+    completeBackgroundStatus("Wallet connected and bridge state loaded.");
     startPolling();
   } catch (error) {
     bridge = null;
+    failBackgroundStatus(error?.message || error);
     renderTopStatus();
     log("Connect/init error:", error?.message || error);
     console.error(error);
@@ -922,10 +1428,17 @@ els.refreshState.addEventListener("click", async () => {
       log("Refresh skipped because a bridge action is in progress.");
       return;
     }
+    beginBackgroundStatus(
+      "Refreshing state",
+      "Updating deposits, withdrawals, and bridge capabilities.",
+      "This refresh does not block normal usage for long, but large histories can take extra time."
+    );
     await ensureBridgeInitialized();
     await refreshQueues();
+    completeBackgroundStatus("Bridge state refreshed successfully.");
     log("State refreshed");
   } catch (error) {
+    failBackgroundStatus(error?.message || error);
     log("Refresh error:", error?.message || error);
     console.error(error);
   }
@@ -947,6 +1460,22 @@ els.stopPolling.addEventListener("click", () => {
   stopPolling();
 });
 
+els.bridgeNetwork?.addEventListener("change", () => {
+  (async () => {
+    const selectedNetworkId = els.bridgeNetwork?.value;
+    if (!selectedNetworkId) return;
+
+    try {
+      await handleBridgeNetworkChange(selectedNetworkId);
+    } catch (error) {
+      populateBridgeNetworkSelector();
+      renderTopStatus();
+      log("Bridge network switch error:", error?.message || error);
+      console.error(error);
+    }
+  })();
+});
+
 els.deposit.addEventListener("click", async () => {
   try {
     await runBridgeAction("deposit submission", async (actionGeneration) => {
@@ -956,13 +1485,16 @@ els.deposit.addEventListener("click", async () => {
 
       const amount = els.amount.value;
       const fee = els.fee.value;
+      const preset = getCurrentBridgePreset();
+      updateActionStatus(`Preparing a deposit of ${amount} MINA on ${preset.label}.`);
       const signTransaction = createWalletTransactionSigner({
         fee,
         memo: "zeko-deposit",
-        requiredNetwork: L1_NETWORK_ID
+        requiredNetwork: preset.l1WalletNetwork
       });
 
       log("Submitting deposit through bridge SDK...");
+      updateActionStatus("Waiting for wallet approval and deposit submission.");
       const result = await submitDepositTx(bridge, account, amount, fee, signTransaction);
       const hash = extractBridgeResultHash(result);
 
@@ -978,10 +1510,17 @@ els.deposit.addEventListener("click", async () => {
       });
 
       log("Deposit submitted:", result);
+      updateActionStatus("Deposit submitted. Refreshing queue state.");
       await refreshQueues({ generation: actionGeneration });
+      completeActionStatus("Deposit submitted successfully and queue state refreshed.");
       startPolling();
+    }, {
+      title: "Deposit to Zeko",
+      detail: "Preparing your deposit request.",
+      hint: "You may need to approve or sign the transaction in your wallet."
     });
   } catch (error) {
+    failActionStatus(error?.message || String(error));
     appendHistory({
       type: "deposit-submit",
       status: "error",
@@ -1006,13 +1545,16 @@ els.withdraw.addEventListener("click", async () => {
 
       const amount = els.amount.value;
       const fee = els.fee.value;
+      const preset = getCurrentBridgePreset();
+      updateActionStatus(`Preparing a withdrawal of ${amount} MINA on ${preset.label}.`);
       const signTransaction = createWalletTransactionSigner({
         fee,
         memo: "zeko-withdraw",
-        requiredNetwork: L2_NETWORK_ID
+        requiredNetwork: preset.l2WalletNetwork
       });
 
       log("Submitting withdrawal through bridge SDK...");
+      updateActionStatus("Waiting for wallet approval and withdrawal submission.");
       const result = await submitWithdrawalTx(bridge, account, amount, fee, signTransaction);
       const hash = extractBridgeResultHash(result);
 
@@ -1028,10 +1570,17 @@ els.withdraw.addEventListener("click", async () => {
       });
 
       log("Withdrawal submitted:", result);
+      updateActionStatus("Withdrawal submitted. Refreshing queue state.");
       await refreshQueues({ generation: actionGeneration });
+      completeActionStatus("Withdrawal submitted successfully and queue state refreshed.");
       startPolling();
+    }, {
+      title: "Withdraw to Mina",
+      detail: "Preparing your withdrawal request.",
+      hint: "You may need to approve or sign the transaction in your wallet."
     });
   } catch (error) {
+    failActionStatus(error?.message || String(error));
     appendHistory({
       type: "withdraw-submit",
       status: "error",
@@ -1061,14 +1610,17 @@ els.claimNextDeposit.addEventListener("click", async () => {
 
       if (!caps?.canFinalize || !nextClaimable) {
         log("No claimable deposit available after refresh.");
+        completeActionStatus("No claimable deposit is available right now.", "The queue was refreshed successfully.");
         return;
       }
 
       const fee = els.fee.value;
+      const preset = getCurrentBridgePreset();
+      updateActionStatus(`Preparing claim for deposit #${nextClaimable.index}.`);
       const signTransaction = createWalletTransactionSigner({
         fee,
         memo: "zeko-finalize-deposit",
-        requiredNetwork: L2_NETWORK_ID
+        requiredNetwork: preset.l2WalletNetwork
       });
 
       log("Claiming next eligible deposit...", {
@@ -1077,6 +1629,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
         hash: nextClaimable.hash
       });
 
+      updateActionStatus("Waiting for wallet approval and deposit claim submission.");
       const result = await buildFinalizeDepositTx(bridge, account, fee, signTransaction);
       const hash = extractBridgeResultHash(result);
 
@@ -1092,10 +1645,17 @@ els.claimNextDeposit.addEventListener("click", async () => {
       });
 
       log("Claim next eligible deposit submitted:", result);
+      updateActionStatus("Claim submitted. Refreshing queue state.");
       await refreshQueues({ generation: actionGeneration });
+      completeActionStatus("Deposit claim submitted successfully and queue state refreshed.");
+    }, {
+      title: "Claim deposit",
+      detail: "Checking the next claimable deposit.",
+      hint: "Claims can take a while because the bridge may need to prepare proof data."
     });
   } catch (error) {
     const message = error?.message || String(error);
+    failActionStatus(message);
 
     appendHistory({
       type: "deposit-claim-next",
@@ -1111,6 +1671,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
     if (isLikelyTransientFinalizeError(message)) {
       log("Transient claim error; refreshing queue state...", message);
       try {
+        updateActionStatus("Refreshing queue state after a transient claim error.");
         await refreshQueues();
       } catch (refreshError) {
         log("Refresh after claim error failed:", refreshError?.message || refreshError);
@@ -1137,14 +1698,17 @@ els.cancelNextDeposit.addEventListener("click", async () => {
 
       if (!caps?.canCancel || !nextCancellable) {
         log("No cancellable deposit available after refresh.");
+        completeActionStatus("No cancellable deposit is available right now.", "The queue was refreshed successfully.");
         return;
       }
 
       const fee = els.fee.value;
+      const preset = getCurrentBridgePreset();
+      updateActionStatus(`Preparing cancellation for deposit #${nextCancellable.index}.`);
       const signTransaction = createWalletTransactionSigner({
         fee,
         memo: "zeko-cancel-deposit",
-        requiredNetwork: L1_NETWORK_ID
+        requiredNetwork: preset.l1WalletNetwork
       });
 
       log("Cancelling next eligible deposit...", {
@@ -1153,6 +1717,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
         hash: nextCancellable.hash
       });
 
+      updateActionStatus("Waiting for wallet approval and deposit cancellation.");
       const result = await buildCancelDepositTx(bridge, account, fee, signTransaction);
       const hash = extractBridgeResultHash(result);
 
@@ -1168,10 +1733,17 @@ els.cancelNextDeposit.addEventListener("click", async () => {
       });
 
       log("Cancel next eligible deposit submitted:", result);
+      updateActionStatus("Cancellation submitted. Refreshing queue state.");
       await refreshQueues({ generation: actionGeneration });
+      completeActionStatus("Deposit cancellation submitted successfully and queue state refreshed.");
+    }, {
+      title: "Cancel deposit",
+      detail: "Checking the next cancellable deposit.",
+      hint: "This action submits a cancellation request through your wallet."
     });
   } catch (error) {
     const message = error?.message || String(error);
+    failActionStatus(message);
 
     appendHistory({
       type: "deposit-cancel-next",
@@ -1187,6 +1759,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
     if (isLikelyTransientFinalizeError(message)) {
       log("Transient cancel error; refreshing queue state...", message);
       try {
+        updateActionStatus("Refreshing queue state after a transient cancellation error.");
         await refreshQueues();
       } catch (refreshError) {
         log("Refresh after cancel error failed:", refreshError?.message || refreshError);
@@ -1213,14 +1786,17 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
 
       if (!caps?.canFinalize || !nextFinalizable) {
         log("No finalizable withdrawal available after refresh.");
+        completeActionStatus("No finalizable withdrawal is available right now.", "The queue was refreshed successfully.");
         return;
       }
 
       const fee = els.fee.value;
+      const preset = getCurrentBridgePreset();
+      updateActionStatus(`Preparing finalization for withdrawal #${nextFinalizable.index}.`);
       const signTransaction = createWalletTransactionSigner({
         fee,
         memo: "zeko-finalize-withdrawal",
-        requiredNetwork: L1_NETWORK_ID
+        requiredNetwork: preset.l1WalletNetwork
       });
 
       log("Finalizing next eligible withdrawal...", {
@@ -1229,6 +1805,7 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
         hash: nextFinalizable.hash
       });
 
+      updateActionStatus("Waiting for wallet approval and withdrawal finalization.");
       const result = await buildFinalizeWithdrawalTx(bridge, account, fee, signTransaction);
       const hash = extractBridgeResultHash(result);
 
@@ -1244,10 +1821,17 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
       });
 
       log("Finalize next eligible withdrawal submitted:", result);
+      updateActionStatus("Finalization submitted. Refreshing queue state.");
       await refreshQueues({ generation: actionGeneration });
+      completeActionStatus("Withdrawal finalization submitted successfully and queue state refreshed.");
+    }, {
+      title: "Finalize withdrawal",
+      detail: "Checking the next finalizable withdrawal.",
+      hint: "Finalization can take longer because bridge proof data may still be catching up."
     });
   } catch (error) {
     const message = error?.message || String(error);
+    failActionStatus(message);
 
     appendHistory({
       type: "withdraw-finalize-next",
@@ -1263,6 +1847,7 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
     if (isLikelyTransientFinalizeError(message)) {
       log("Transient finalize-withdrawal error; refreshing queue state...", message);
       try {
+        updateActionStatus("Refreshing queue state after a transient finalize error.");
         await refreshQueues();
       } catch (refreshError) {
         log("Refresh after finalize-withdrawal error failed:", refreshError?.message || refreshError);
@@ -1278,6 +1863,22 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
 els.clearHistory.addEventListener("click", () => {
   clearHistory();
   log("Cleared local history");
+});
+
+els.actionStatusClose?.addEventListener("click", () => {
+  dismissActionStatus();
+});
+
+els.actionStatusIndicator?.addEventListener("click", () => {
+  if (actionStatusState.visible) {
+    dismissActionStatus();
+    return;
+  }
+  revealActionStatus();
+});
+
+els.actionStatusReduced?.addEventListener("click", () => {
+  revealActionStatus();
 });
 
 document.addEventListener("click", async (event) => {
@@ -1375,24 +1976,39 @@ if (typeof DESKTOP_MEDIA_QUERY.addEventListener === "function") {
 }
 
 window.addEventListener("resize", updateDesktopScale);
+window.addEventListener("scroll", maybeAutoReduceActionStatus, { passive: true });
+window.addEventListener("resize", maybeAutoReduceActionStatus);
 
 (async function boot() {
   try {
+    const savedNetworkId = loadPreferences().bridgeNetwork;
+    if (savedNetworkId) {
+      setBridgeNetwork(savedNetworkId);
+    }
+    populateBridgeNetworkSelector();
     applyThemeMode();
     initializeCardControls();
     renderAll();
 
     const existing = await getConnectedAccount();
     if (existing) {
+      beginBackgroundStatus(
+        "Restoring session",
+        "Reconnecting the wallet session and loading bridge data.",
+        "Saved wallet sessions may still need a fresh bridge initialization and queue sync."
+      );
       account = existing;
-      renderTopStatus();
+      await refreshWalletNetwork();
+      alignBridgeNetworkToWalletIfNeeded();
       log("Wallet already connected:", existing);
 
-      await initializeBridge();
+      await ensureBridgeInitialized();
       await refreshQueues();
+      completeBackgroundStatus("Session restored and bridge state loaded.");
       startPolling();
     }
   } catch (error) {
+    failBackgroundStatus(error?.message || error);
     log("Boot info:", error?.message || error);
   }
 })();

@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta id="viewportMeta" name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Zeko Bridge UI</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -13,11 +14,22 @@
           <div class="hero-topline">
             <span class="eyebrow">Mina <span class="muted-arrow">to</span> Zeko bridge</span>
             <div class="hero-toolbar">
-              <button id="toggleThemeMode" class="ghost-button subtle-button icon-button" type="button" aria-pressed="false" aria-label="Activate dark mode" title="Activate dark mode">
-                <span id="themeModeIcon" class="icon-glyph" aria-hidden="true"></span>
-              </button>
-              <button id="toggleDesktopMode" class="ghost-button subtle-button icon-button" type="button" aria-pressed="false" aria-label="Enable desktop mode" title="Enable desktop mode">
-                <span id="desktopModeIcon" class="icon-glyph" aria-hidden="true"></span>
+              <div class="hero-toolbar-main">
+                <button id="toggleThemeMode" class="ghost-button subtle-button icon-button" type="button" aria-pressed="false" aria-label="Activate dark mode" title="Activate dark mode">
+                  <span id="themeModeIcon" class="icon-glyph" aria-hidden="true"></span>
+                </button>
+                <button id="toggleDesktopMode" class="ghost-button subtle-button icon-button" type="button" aria-pressed="false" aria-label="Enable desktop mode" title="Enable desktop mode">
+                  <span id="desktopModeIcon" class="icon-glyph" aria-hidden="true"></span>
+                </button>
+              </div>
+              <button
+                id="actionStatusIndicator"
+                class="ghost-button subtle-button icon-button action-indicator-button"
+                type="button"
+                aria-label="No action in progress"
+                title="No action in progress"
+              >
+                <span id="actionStatusIndicatorGlyph" class="spinner-glyph" aria-hidden="true"></span>
               </button>
             </div>
           </div>
@@ -29,6 +41,10 @@
 
         <div class="hero-status">
           <div class="status-pill" id="connectionStatus">Wallet disconnected</div>
+          <div class="status-meta">
+            <div class="meta-label">Connected network</div>
+            <div id="walletNetwork" class="meta-value">Unknown</div>
+          </div>
           <div class="status-meta">
             <div class="meta-label">Connected account</div>
             <div id="account" class="meta-value">Not connected</div>
@@ -77,6 +93,12 @@
               <p class="section-text">Refresh queue state now or keep this page synced automatically.</p>
             </div>
           </div>
+
+          <label>
+            Bridge network
+            <span class="field-help">Choose whether this UI operates on Zeko mainnet or testnet.</span>
+            <select id="bridgeNetwork"></select>
+          </label>
 
           <div class="stats-strip">
             <div class="mini-stat">
@@ -190,7 +212,7 @@
           <div id="localHistory" class="queue-list"></div>
         </div>
 
-        <div class="card">
+        <div class="card activity-log-card">
           <div class="section-heading">
             <div>
               <h2>Activity log</h2>
@@ -201,6 +223,30 @@
         </div>
       </section>
     </div>
+
+    <aside id="actionStatus" class="action-status" hidden aria-live="polite" aria-atomic="true">
+      <div class="action-status-card">
+        <div class="action-status-head">
+          <div>
+            <div id="actionStatusPill" class="action-status-pill">Action in progress</div>
+            <div id="actionStatusTitle" class="action-status-title">Preparing action</div>
+          </div>
+          <button id="actionStatusClose" class="ghost-button action-status-close" type="button">Reduce</button>
+        </div>
+        <div id="actionStatusDetail" class="action-status-detail">Waiting for the next step...</div>
+        <div class="action-status-progress-track">
+          <span id="actionStatusProgress" class="action-status-progress"></span>
+        </div>
+        <div class="action-status-meta">
+          <span id="actionStatusElapsed">Elapsed: 0s</span>
+          <span id="actionStatusHint">Live updates are shown here while the SDK is working.</span>
+        </div>
+      </div>
+    </aside>
+
+    <button id="actionStatusReduced" class="action-status-reduced" type="button" hidden aria-live="polite" aria-atomic="true">
+      <span id="actionStatusReducedText">Elapsed: 0s - Waiting for the next step...</span>
+    </button>
 
     <script type="module" src="/src/main.js"></script>
   </body>

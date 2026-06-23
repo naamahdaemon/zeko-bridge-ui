@@ -104,7 +104,9 @@ async function callProvider(mina, directMethodCandidates, requestMethodCandidate
 const NETWORK_ALIASES = {
   "mina:devnet": ["mina:devnet", "mina:testnet"],
   "mina:testnet": ["mina:testnet", "mina:devnet"],
-  "zeko:testnet": ["zeko:testnet"]
+  "mina:mainnet": ["mina:mainnet"],
+  "zeko:testnet": ["zeko:testnet"],
+  "zeko:mainnet": ["zeko:mainnet"]
 };
 
 function getAcceptedNetworkIds(networkId) {

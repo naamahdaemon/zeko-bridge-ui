@@ -2,18 +2,74 @@ import { Bridge, diagnoseBridgeHistory } from "@zeko-labs/bridge-sdk";
 import { PublicKey, UInt32, UInt64, fetchAccount, setGraphqlEndpoint } from "o1js";
 
 const MINA = 1e9;
-const BRIDGE_CONFIG = {
-  l1Url: "https://gateway.mina.devnet.zeko.io",
-  l1ArchiveUrl: "https://gateway.mina.archive.devnet.zeko.io",
-  actionsApi: "https://testnet.api.actions.zeko.io/graphql",
-  zekoUrl: "https://testnet.zeko.io/graphql",
-  zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql",
-  l1Network: "testnet",
-  l2Network: "testnet",
-  pollTimeout: 1_200_000
+export const BRIDGE_NETWORK_PRESETS = {
+  mainnet: {
+    id: "mainnet",
+    label: "Mainnet",
+    l1WalletNetwork: "mina:mainnet",
+    l2WalletNetwork: "zeko:mainnet",
+    config: {
+      l1Url: "https://api.minascan.io/node/mainnet/v1/graphql",
+      l1ArchiveUrl: "https://api.minascan.io/archive/mainnet/v1/graphql",
+      actionsApi: "https://api.actions.zeko.io/graphql",
+      zekoUrl: "https://mainnet.zeko.io/graphql",
+      zekoArchiveUrl: "https://archive.mainnet.zeko.io/graphql",
+      l1Network: "mainnet",
+      l2Network: "mainnet",
+      pollTimeout: 1_200_000
+    }
+  },
+  testnet: {
+    id: "testnet",
+    label: "Testnet",
+    l1WalletNetwork: "mina:devnet",
+    l2WalletNetwork: "zeko:testnet",
+    config: {
+      l1Url: "https://gateway.mina.devnet.zeko.io",
+      l1ArchiveUrl: "https://gateway.mina.archive.devnet.zeko.io",
+      actionsApi: "https://testnet.api.actions.zeko.io/graphql",
+      zekoUrl: "https://testnet.zeko.io/graphql",
+      zekoArchiveUrl: "https://archive.testnet.zeko.io/graphql",
+      l1Network: "testnet",
+      l2Network: "testnet",
+      pollTimeout: 1_200_000
+    }
+  }
 };
+
+const DEFAULT_BRIDGE_NETWORK_ID = "mainnet";
+let activeBridgeNetworkId = DEFAULT_BRIDGE_NETWORK_ID;
 const DIAGNOSTICS_CACHE_TTL_MS = 60000;
 const depositDiagnosticsCache = new Map();
+
+function getBridgePresetOrThrow(networkId) {
+  const preset = BRIDGE_NETWORK_PRESETS[networkId];
+  if (!preset) {
+    throw new Error(`Unsupported bridge network preset: ${networkId}`);
+  }
+  return preset;
+}
+
+function getBridgeConfig() {
+  return getBridgePresetOrThrow(activeBridgeNetworkId).config;
+}
+
+export function getCurrentBridgeNetworkId() {
+  return activeBridgeNetworkId;
+}
+
+export function getCurrentBridgePreset() {
+  return getBridgePresetOrThrow(activeBridgeNetworkId);
+}
+
+export function getBridgeNetworkOptions() {
+  return Object.values(BRIDGE_NETWORK_PRESETS).map(({ id, label }) => ({ id, label }));
+}
+
+export function setBridgeNetwork(networkId) {
+  activeBridgeNetworkId = getBridgePresetOrThrow(networkId).id;
+  depositDiagnosticsCache.clear();
+}
 
 function toNano(amount) {
   const value = Number(amount);
@@ -198,15 +254,17 @@ async function withVerificationKeyDiagnostics(actionLabel, graphqlEndpoint, chec
 }
 
 async function getDepositTimestampFallbacks(account) {
+  const config = getBridgeConfig();
   const walletAddress = toComparableString(account);
-  const cached = depositDiagnosticsCache.get(walletAddress);
+  const cacheKey = `${activeBridgeNetworkId}:${walletAddress}`;
+  const cached = depositDiagnosticsCache.get(cacheKey);
 
   if (cached && Date.now() - cached.fetchedAt < DIAGNOSTICS_CACHE_TTL_MS) {
     return cached.timestampsByHash;
   }
 
   const diagnostics = await diagnoseBridgeHistory({
-    config: BRIDGE_CONFIG,
+    config,
     walletAddress
   });
 
@@ -216,7 +274,7 @@ async function getDepositTimestampFallbacks(account) {
       .map((entry) => [entry.hash, entry.timestamp])
   );
 
-  depositDiagnosticsCache.set(walletAddress, {
+  depositDiagnosticsCache.set(cacheKey, {
     fetchedAt: Date.now(),
     timestampsByHash
   });
@@ -225,19 +283,20 @@ async function getDepositTimestampFallbacks(account) {
 }
 
 export async function initBridge() {
-  return await Bridge.init(BRIDGE_CONFIG);
+  return await Bridge.init(getBridgeConfig());
 }
 
 export async function submitDepositTx(bridge, account, amount, fee, signTransaction) {
+  const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
   return await withVerificationKeyDiagnostics(
     "submitDeposit",
-    BRIDGE_CONFIG.l1Url,
+    config.l1Url,
     [
-      { label: "outerPk", publicKey: bridge.outerPk, endpoint: BRIDGE_CONFIG.l1Url },
-      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+      { label: "outerPk", publicKey: bridge.outerPk, endpoint: config.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: config.l1Url }
     ],
     () =>
       bridge.submitDeposit(
@@ -257,14 +316,15 @@ export async function submitDepositTx(bridge, account, amount, fee, signTransact
 }
 
 export async function submitWithdrawalTx(bridge, account, amount, fee, signTransaction) {
+  const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
 
   return await withVerificationKeyDiagnostics(
     "submitWithdrawal",
-    BRIDGE_CONFIG.zekoUrl,
+    config.zekoUrl,
     [
-      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: BRIDGE_CONFIG.zekoUrl },
-      { label: "innerPk", publicKey: bridge.innerPk, endpoint: BRIDGE_CONFIG.zekoUrl }
+      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: config.zekoUrl },
+      { label: "innerPk", publicKey: bridge.innerPk, endpoint: config.zekoUrl }
     ],
     () =>
       bridge.submitWithdrawal(
@@ -348,13 +408,14 @@ export async function getWithdrawalCapabilities(bridge, account) {
 }
 
 export async function buildFinalizeDepositTx(bridge, account, fee, signTransaction) {
+  const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
 
   return await withVerificationKeyDiagnostics(
     "finalizeDeposit",
-    BRIDGE_CONFIG.zekoUrl,
+    config.zekoUrl,
     [
-      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: BRIDGE_CONFIG.zekoUrl }
+      { label: "innerHolder", publicKey: bridge.innerHolder, endpoint: config.zekoUrl }
     ],
     () =>
       bridge.finalizeDeposit(
@@ -366,15 +427,16 @@ export async function buildFinalizeDepositTx(bridge, account, fee, signTransacti
 }
 
 export async function buildCancelDepositTx(bridge, account, fee, signTransaction) {
+  const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
   return await withVerificationKeyDiagnostics(
     "cancelDeposit",
-    BRIDGE_CONFIG.l1Url,
+    config.l1Url,
     [
-      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: BRIDGE_CONFIG.l1Url },
-      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: config.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: config.l1Url }
     ],
     () =>
       bridge.cancelDeposit(
@@ -387,15 +449,16 @@ export async function buildCancelDepositTx(bridge, account, fee, signTransaction
 }
 
 export async function buildFinalizeWithdrawalTx(bridge, account, fee, signTransaction) {
+  const config = getBridgeConfig();
   if (!bridge) throw new Error("Bridge is not initialized.");
   if (!bridge.outerHolders?.length) throw new Error("Bridge outerHolders are missing.");
 
   return await withVerificationKeyDiagnostics(
     "finalizeWithdrawal",
-    BRIDGE_CONFIG.l1Url,
+    config.l1Url,
     [
-      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: BRIDGE_CONFIG.l1Url },
-      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: BRIDGE_CONFIG.l1Url }
+      { label: "outerTokenOwner", publicKey: bridge.outerTokenOwner, endpoint: config.l1Url },
+      { label: "outerHolder", publicKey: bridge.outerHolders[0], endpoint: config.l1Url }
     ],
     () =>
       bridge.finalizeWithdrawal(

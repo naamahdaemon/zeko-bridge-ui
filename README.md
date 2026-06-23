@@ -1,6 +1,6 @@
 # Zeko Bridge UI
 
-A small browser UI for testing the Zeko bridge flow from a connected Mina wallet.
+A small browser UI for operating the Zeko bridge flow from a connected Mina wallet.
 
 It lets you:
 
@@ -11,6 +11,7 @@ It lets you:
 - finalize or cancel eligible bridge actions
 - view readable timestamps and estimated next-step timing
 - switch networks automatically when an action requires a different chain
+- choose between Zeko mainnet and testnet bridge presets
 
 ## Screenshots
 
@@ -44,24 +45,26 @@ It lets you:
 
 ## Networks
 
-This UI is currently configured for:
+This UI currently supports two presets:
 
-- L1: Mina devnet APIs
-- L2: Zeko testnet APIs
+- Mainnet: Mina mainnet APIs + Zeko mainnet APIs
+- Testnet: Mina devnet/testnet-compatible APIs + Zeko testnet APIs
+
+You can switch between them directly from the UI.
 
 Action routing:
 
-- Deposit submit: Mina devnet
-- Withdrawal submit: Zeko testnet
-- Deposit finalize: Zeko testnet
-- Deposit cancel: Mina devnet
-- Withdrawal finalize: Mina devnet
+- Deposit submit: Mina on the selected preset
+- Withdrawal submit: Zeko on the selected preset
+- Deposit finalize: Zeko on the selected preset
+- Deposit cancel: Mina on the selected preset
+- Withdrawal finalize: Mina on the selected preset
 
 ## Requirements
 
 - Node.js 18+ recommended
 - A Mina-compatible browser wallet
-- Access to the configured Mina and Zeko testnet endpoints
+- Access to the configured Mina and Zeko endpoints for the selected preset
 
 ## Install
 
