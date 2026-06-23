@@ -22,6 +22,7 @@ const POLLING_DRAIN_TIMEOUT_MS = 30000;
 const SLOT_DURATION_MS = 180000;
 const DESKTOP_MEDIA_QUERY = window.matchMedia("(min-width: 901px)");
 const DESKTOP_BASE_WIDTH = 1180;
+const MAX_VISIBLE_QUEUE_HISTORY_ITEMS = 5;
 const BRIDGE_NETWORK_SELECTION_AUTO = "auto";
 const BRIDGE_NETWORK_SELECTION_MANUAL = "manual";
 const ACTION_STATUS_HIDE_DELAY_MS = 8000;
@@ -33,6 +34,7 @@ const els = {
   desktopModeIcon: document.getElementById("desktopModeIcon"),
   actionStatusIndicator: document.getElementById("actionStatusIndicator"),
   actionStatusIndicatorGlyph: document.getElementById("actionStatusIndicatorGlyph"),
+  actionStatusIndicatorLabel: document.getElementById("actionStatusIndicatorLabel"),
   toggleThemeMode: document.getElementById("toggleThemeMode"),
   themeModeIcon: document.getElementById("themeModeIcon"),
   account: document.getElementById("account"),
@@ -199,14 +201,21 @@ function getActionStatusTooltip() {
   return parts.join(" - ") || "Action status";
 }
 
+function getActionStatusIndicatorText() {
+  if (!actionStatusState.owner) return "";
+  return actionStatusState.title || actionStatusState.label || "";
+}
+
 function renderActionStatusIndicator() {
   if (!els.actionStatusIndicator) return;
 
   const isBusy = Boolean(actionStatusState.owner) && actionStatusState.tone === "working";
   const tooltip = getActionStatusTooltip();
+  const indicatorText = getActionStatusIndicatorText();
 
   els.actionStatusIndicator.classList.toggle("is-busy", isBusy);
   els.actionStatusIndicator.classList.toggle("is-available", Boolean(actionStatusState.owner));
+  els.actionStatusIndicator.classList.toggle("has-text", Boolean(indicatorText));
   els.actionStatusIndicator.setAttribute("aria-disabled", String(!actionStatusState.owner));
   els.actionStatusIndicator.setAttribute(
     "aria-label",
@@ -216,6 +225,10 @@ function renderActionStatusIndicator() {
 
   if (els.actionStatusIndicatorGlyph) {
     els.actionStatusIndicatorGlyph.classList.toggle("is-spinning", isBusy);
+  }
+
+  if (els.actionStatusIndicatorLabel) {
+    els.actionStatusIndicatorLabel.textContent = indicatorText;
   }
 }
 
@@ -958,6 +971,11 @@ const uiState = {
   lastRefreshAt: null
 };
 
+const queueExpansionState = {
+  deposit: {},
+  withdrawal: {}
+};
+
 function resetQueueState() {
   uiState.depositState = null;
   uiState.depositCapabilities = null;
@@ -1015,7 +1033,63 @@ function renderSummaryGrid(container, items) {
     .join("");
 }
 
-function renderDepositQueue() {
+function isDepositDone(deposit) {
+  return Boolean(deposit?.finalised || deposit?.cancelled);
+}
+
+function isWithdrawalDone(withdrawal) {
+  return Boolean(withdrawal?.finalised);
+}
+
+function getVisibleQueueItems(items, isDone) {
+  const sorted = [...items].sort((a, b) => a.index - b.index);
+  const activeItems = sorted.filter((item) => !isDone(item));
+
+  if (activeItems.length >= MAX_VISIBLE_QUEUE_HISTORY_ITEMS) {
+    return activeItems;
+  }
+
+  const doneItems = sorted.filter((item) => isDone(item));
+  const trailingDoneItems = doneItems.slice(-(MAX_VISIBLE_QUEUE_HISTORY_ITEMS - activeItems.length));
+  return [...activeItems, ...trailingDoneItems].sort((a, b) => a.index - b.index);
+}
+
+function isQueueItemExpanded(queueType, itemIndex, isDone) {
+  const storedValue = queueExpansionState[queueType]?.[itemIndex];
+  if (typeof storedValue === "boolean") {
+    return storedValue;
+  }
+  return !isDone;
+}
+
+function toggleQueueItemExpansion(queueType, itemIndex, isDone) {
+  queueExpansionState[queueType][itemIndex] = !isQueueItemExpanded(queueType, itemIndex, isDone);
+  renderAll();
+}
+
+function getDepositCurrentStatus(deposit, { isClaimableNow = false, isCancellableNow = false } = {}) {
+  if (deposit.finalised) return { label: "Claimed", tone: "ok" };
+  if (deposit.cancelled) return { label: "Canceled", tone: "warn" };
+  if (isClaimableNow) return { label: "Claimable now", tone: "claimable" };
+  if (isCancellableNow) return { label: "Cancellable now", tone: "warn" };
+  if (deposit.confirmed) return { label: "Confirmed", tone: "ok" };
+  if (deposit.accepted) return { label: "Accepted", tone: "ok" };
+  if (deposit.synced) return { label: "Synced", tone: "ok" };
+  return { label: "Queued", tone: "dim" };
+}
+
+function getWithdrawalCurrentStatus(withdrawal, { isFinalizableNow = false } = {}) {
+  if (withdrawal.finalised) return { label: "Finalized", tone: "ok" };
+  if (isFinalizableNow) return { label: "Finalizable now", tone: "claimable" };
+  if (withdrawal.committed) return { label: "Committed", tone: "ok" };
+  return { label: "Queued", tone: "dim" };
+}
+
+function renderCurrentStatusBadge(status) {
+  return `<span class="badge ${status.tone}">${escapeHtml(status.label)}</span>`;
+}
+
+function renderQueueDepositCards() {
   const state = uiState.depositState;
   const caps = uiState.depositCapabilities;
   const nextClaimable = pickNextClaimableDeposit(state, caps);
@@ -1178,6 +1252,211 @@ function renderWithdrawalQueue() {
   els.withdrawalQueue.innerHTML = html;
 }
 
+function renderQueueDepositCardsUpdated() {
+  const state = uiState.depositState;
+  const caps = uiState.depositCapabilities;
+  const nextClaimable = pickNextClaimableDeposit(state, caps);
+  const nextCancellable = pickNextCancellableDeposit(state, caps);
+
+  els.nextClaimableDeposit.textContent = nextClaimable
+    ? `index ${nextClaimable.index} • ${formatMinaFromNanoLike(nextClaimable.amount.toString())} MINA`
+    : "-";
+
+  els.nextCancellableDeposit.textContent = nextCancellable
+    ? `index ${nextCancellable.index} • ${formatMinaFromNanoLike(nextCancellable.amount.toString())} MINA`
+    : "-";
+
+  els.depositGlobalReason.textContent =
+    caps?.finalizeReason ||
+    caps?.cancelReason ||
+    "-";
+
+  els.claimNextDeposit.disabled = !caps?.canFinalize;
+  els.cancelNextDeposit.disabled = !caps?.canCancel;
+
+  renderSummaryGrid(els.depositSummary, [
+    { label: "Total deposits", value: state?.deposits?.length ?? 0 },
+    { label: "Synced index", value: state?.syncedIndex ?? "-" },
+    { label: "Accepted index", value: state?.acceptedIndex ?? "-" },
+    { label: "Confirmed index", value: state?.confirmedIndex ?? "-" },
+    { label: "Finalised index", value: state?.finalisedIndex ?? "-" },
+    { label: "Cancelled index", value: state?.cancelledIndex ?? "-" }
+  ]);
+
+  if (!state?.deposits?.length) {
+    els.depositQueue.innerHTML = `<div class="queue-item"><div class="queue-title">No deposits found for this wallet.</div></div>`;
+    return;
+  }
+
+  const nextClaimableIndex = nextClaimable?.index ?? null;
+  const nextCancellableIndex = nextCancellable?.index ?? null;
+
+  const html = getVisibleQueueItems(state.deposits, isDepositDone)
+    .map((d) => {
+      const recipient = d.recipient?.toBase58?.() ?? String(d.recipient);
+      const amount = d.amount?.toString?.() ?? String(d.amount);
+      const timeout = d.timeout?.toString?.() ?? String(d.timeout);
+      const holder = d.holderAccountL1?.toBase58?.() ?? String(d.holderAccountL1);
+      const isClaimableNow = caps?.canFinalize && d.index === nextClaimableIndex;
+      const isCancellableNow = caps?.canCancel && d.index === nextCancellableIndex;
+      const isNextAction = d.index === nextClaimableIndex || d.index === nextCancellableIndex;
+      const isDone = isDepositDone(d);
+      const isExpanded = isQueueItemExpanded("deposit", d.index, isDone);
+      const currentStatus = getDepositCurrentStatus(d, { isClaimableNow, isCancellableNow });
+
+      const classes = [
+        "queue-item",
+        isNextAction ? "next-action" : "",
+        !isDone && !d.accepted && d.synced ? "warning" : "",
+        isDone ? "done" : "",
+        !isExpanded ? "is-collapsed" : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const titleBadges = [
+        d.index === nextClaimableIndex ? '<span class="badge claimable">next claimable</span>' : "",
+        d.index === nextCancellableIndex ? '<span class="badge warn">next cancellable</span>' : ""
+      ]
+        .filter(Boolean)
+        .join("");
+
+      return `
+        <div class="${classes}">
+          <button
+            class="queue-toggle"
+            type="button"
+            data-queue-type="deposit"
+            data-queue-index="${d.index}"
+            data-queue-done="${isDone}"
+            aria-expanded="${isExpanded}"
+          >
+            <span class="queue-toggle-main">
+              <span class="queue-title">Deposit #${d.index}</span>
+              ${titleBadges}
+            </span>
+            <span class="queue-toggle-side">
+              ${renderCurrentStatusBadge(currentStatus)}
+              <span class="queue-toggle-label">${isExpanded ? "Hide" : "Show"}</span>
+            </span>
+          </button>
+
+          <div class="queue-detail"${isExpanded ? "" : " hidden"}>
+            <div class="queue-grid">
+              <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
+              <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
+              <div><strong>Holder:</strong> ${shortPk(holder)}</div>
+              <div><strong>Timeout:</strong> ${timeout}</div>
+              <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
+              <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
+              <div><strong>Estimate:</strong> ${estimateDepositLabel(d, isClaimableNow)}</div>
+            </div>
+
+            <div class="queue-badges">
+              ${isClaimableNow ? '<span class="badge claimable">claimable now</span>' : ""}
+              ${isCancellableNow ? '<span class="badge warn">cancellable now</span>' : ""}
+              <span class="badge ${d.synced ? "ok" : "dim"}">synced: ${d.synced}</span>
+              <span class="badge ${d.accepted ? "ok" : "warn"}">accepted: ${d.accepted}</span>
+              <span class="badge ${d.confirmed ? "ok" : "dim"}">confirmed: ${d.confirmed}</span>
+              <span class="badge ${d.finalised ? "ok" : "dim"}">finalised: ${d.finalised}</span>
+              <span class="badge ${d.cancelled ? "warn" : "dim"}">cancelled: ${d.cancelled}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.depositQueue.innerHTML = html;
+}
+
+function renderQueueWithdrawalCards() {
+  const state = uiState.withdrawalState;
+  const caps = uiState.withdrawalCapabilities;
+  const nextFinalizable = pickNextFinalizableWithdrawal(state);
+
+  els.nextFinalizableWithdrawal.textContent = nextFinalizable
+    ? `index ${nextFinalizable.index} • ${formatMinaFromNanoLike(nextFinalizable.amount.toString())} MINA`
+    : "-";
+
+  els.withdrawalGlobalReason.textContent = caps?.finalizeReason || "-";
+  els.finalizeNextWithdrawal.disabled = !caps?.canFinalize;
+
+  renderSummaryGrid(els.withdrawalSummary, [
+    { label: "Total withdrawals", value: state?.withdrawals?.length ?? 0 },
+    { label: "Committed index", value: state?.committedIndex ?? "-" },
+    { label: "Finalised index", value: state?.finalisedIndex ?? "-" }
+  ]);
+
+  if (!state?.withdrawals?.length) {
+    els.withdrawalQueue.innerHTML = `<div class="queue-item"><div class="queue-title">No withdrawals found for this wallet.</div></div>`;
+    return;
+  }
+
+  const nextFinalizableIndex = nextFinalizable?.index ?? null;
+
+  const html = getVisibleQueueItems(state.withdrawals, isWithdrawalDone)
+    .map((w) => {
+      const recipient = w.recipient?.toBase58?.() ?? String(w.recipient);
+      const amount = w.amount?.toString?.() ?? String(w.amount);
+      const isNextAction = w.index === nextFinalizableIndex;
+      const isDone = isWithdrawalDone(w);
+      const isExpanded = isQueueItemExpanded("withdrawal", w.index, isDone);
+      const isFinalizableNow = w.index === nextFinalizableIndex;
+      const currentStatus = getWithdrawalCurrentStatus(w, { isFinalizableNow });
+
+      const classes = [
+        "queue-item",
+        isNextAction ? "next-action" : "",
+        isDone ? "done" : "",
+        !isExpanded ? "is-collapsed" : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      return `
+        <div class="${classes}">
+          <button
+            class="queue-toggle"
+            type="button"
+            data-queue-type="withdrawal"
+            data-queue-index="${w.index}"
+            data-queue-done="${isDone}"
+            aria-expanded="${isExpanded}"
+          >
+            <span class="queue-toggle-main">
+              <span class="queue-title">Withdrawal #${w.index}</span>
+              ${w.index === nextFinalizableIndex ? '<span class="badge claimable">next finalizable</span>' : ""}
+            </span>
+            <span class="queue-toggle-side">
+              ${renderCurrentStatusBadge(currentStatus)}
+              <span class="queue-toggle-label">${isExpanded ? "Hide" : "Show"}</span>
+            </span>
+          </button>
+
+          <div class="queue-detail"${isExpanded ? "" : " hidden"}>
+            <div class="queue-grid">
+              <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
+              <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
+              <div><strong>Hash:</strong> ${renderHashValue(w.hash)}</div>
+              <div><strong>Timestamp:</strong> ${formatChainTimestamp(w.timestamp)}</div>
+              <div><strong>Estimate:</strong> ${estimateWithdrawalLabel(w)}</div>
+            </div>
+
+            <div class="queue-badges">
+              ${isFinalizableNow ? '<span class="badge claimable">finalizable now</span>' : ""}
+              <span class="badge ${w.committed ? "ok" : "dim"}">committed: ${w.committed}</span>
+              <span class="badge ${w.finalised ? "ok" : "dim"}">finalised: ${w.finalised}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.withdrawalQueue.innerHTML = html;
+}
+
 function renderLocalHistory() {
   const history = getStoredHistory();
 
@@ -1207,8 +1486,8 @@ function renderLocalHistory() {
 
 function renderAll() {
   renderTopStatus();
-  renderDepositQueue();
-  renderWithdrawalQueue();
+  renderQueueDepositCardsUpdated();
+  renderQueueWithdrawalCards();
   renderLocalHistory();
   renderActionStatus();
 }
@@ -1888,6 +2167,28 @@ els.actionStatusIndicator?.addEventListener("click", () => {
 
 els.actionStatusReduced?.addEventListener("click", () => {
   revealActionStatus();
+});
+
+els.depositQueue?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-queue-type='deposit']");
+  if (!button) return;
+
+  const itemIndex = Number(button.getAttribute("data-queue-index"));
+  const isDone = button.getAttribute("data-queue-done") === "true";
+  if (!Number.isInteger(itemIndex)) return;
+
+  toggleQueueItemExpansion("deposit", itemIndex, isDone);
+});
+
+els.withdrawalQueue?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-queue-type='withdrawal']");
+  if (!button) return;
+
+  const itemIndex = Number(button.getAttribute("data-queue-index"));
+  const isDone = button.getAttribute("data-queue-done") === "true";
+  if (!Number.isInteger(itemIndex)) return;
+
+  toggleQueueItemExpansion("withdrawal", itemIndex, isDone);
 });
 
 document.addEventListener("click", async (event) => {
