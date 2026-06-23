@@ -879,6 +879,34 @@ function formatChainTimestamp(value) {
   return formatDateTime(normalized);
 }
 
+function formatDepositTimeout(value) {
+  if (value === null || value === undefined || value === "") return "-";
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return safeText(value);
+  }
+
+  if (numeric === 4294967295) {
+    return "No timeout";
+  }
+
+  return `Until slot ${numeric}`;
+}
+
+function renderQueueField(label, value, { title = null, extraClass = "" } = {}) {
+  const textValue = safeText(value);
+  const titleAttr = escapeHtml(title ?? (typeof textValue === "string" ? textValue : String(textValue)));
+  const classes = ["queue-field", extraClass].filter(Boolean).join(" ");
+
+  return `
+    <div class="${classes}">
+      <div class="queue-field-label">${escapeHtml(label)}</div>
+      <div class="queue-field-value" title="${titleAttr}">${value}</div>
+    </div>
+  `;
+}
+
 function getBridgeDelayMs() {
   const slots = Number(bridge?.withdrawalDelay?.toString?.() ?? bridge?.withdrawalDelay ?? 0);
   if (!Number.isFinite(slots) || slots <= 0) return null;
@@ -1486,13 +1514,13 @@ function renderQueueDepositCardsUpdated() {
 
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
-              <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
-              <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
-              <div><strong>Holder:</strong> ${shortPk(holder)}</div>
-              <div><strong>Timeout:</strong> ${timeout}</div>
-              <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
-              <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
-              <div><strong>Estimate:</strong> ${estimateDepositLabel(d, isClaimableNow)}</div>
+              ${renderQueueField("Amount", `${formatMinaFromNanoLike(amount)} MINA`)}
+              ${renderQueueField("Recipient", shortPk(recipient), { title: recipient })}
+              ${renderQueueField("Holder", shortPk(holder), { title: holder })}
+              ${renderQueueField("Timeout", formatDepositTimeout(timeout), { title: `Raw timeout: ${timeout}` })}
+              ${renderQueueField("Hash", renderHashValue(d.hash), { title: safeText(d.hash), extraClass: "queue-field--hash" })}
+              ${renderQueueField("Timestamp", formatChainTimestamp(d.timestamp))}
+              ${renderQueueField("Estimate", estimateDepositLabel(d, isClaimableNow), { title: estimateDepositLabel(d, isClaimableNow) })}
             </div>
 
             <div class="queue-badges">
@@ -1579,11 +1607,11 @@ function renderQueueWithdrawalCards() {
 
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
-              <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
-              <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
-              <div><strong>Hash:</strong> ${renderHashValue(w.hash)}</div>
-              <div><strong>Timestamp:</strong> ${formatChainTimestamp(w.timestamp)}</div>
-              <div><strong>Estimate:</strong> ${estimateWithdrawalLabel(w)}</div>
+              ${renderQueueField("Amount", `${formatMinaFromNanoLike(amount)} MINA`)}
+              ${renderQueueField("Recipient", shortPk(recipient), { title: recipient })}
+              ${renderQueueField("Hash", renderHashValue(w.hash), { title: safeText(w.hash), extraClass: "queue-field--hash" })}
+              ${renderQueueField("Timestamp", formatChainTimestamp(w.timestamp))}
+              ${renderQueueField("Estimate", estimateWithdrawalLabel(w), { title: estimateWithdrawalLabel(w) })}
             </div>
 
             <div class="queue-badges">

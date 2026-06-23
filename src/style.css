@@ -707,8 +707,34 @@ body.card-focus-mode .card:not(.is-fullscreen) {
 
 .queue-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.queue-field {
+  min-width: 0;
+}
+
+.queue-field-label,
+.queue-field-value {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-field-label {
+  margin-bottom: 4px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.queue-field-value {
+  color: var(--text);
+}
+
+.queue-field--hash .queue-field-value {
+  overflow: visible;
 }
 
 .local-history-grid {
@@ -730,7 +756,8 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  margin-top: 4px;
+  margin-top: 0;
+  flex-wrap: nowrap;
 }
 
 .hash-value {
@@ -1036,6 +1063,18 @@ pre {
 
   body:not(.force-desktop) .hash-value {
     max-width: 100%;
+  }
+
+  body:not(.force-desktop) .queue-grid,
+  body.card-focus-mode .card.is-fullscreen .queue-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body:not(.force-desktop) .queue-field-label,
+  body:not(.force-desktop) .queue-field-value,
+  body.card-focus-mode .card.is-fullscreen .queue-field-label,
+  body.card-focus-mode .card.is-fullscreen .queue-field-value {
+    white-space: normal;
   }
 
   body:not(.force-desktop) .queue-toggle {
