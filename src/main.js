@@ -1,4 +1,11 @@
-import { connectWallet, createWalletTransactionSigner, getConnectedAccount, getCurrentNetwork } from "./wallet.js";
+import {
+  connectWallet,
+  createWalletTransactionSigner,
+  getAccountBalance,
+  getConnectedAccount,
+  getCurrentNetwork,
+  subscribeToWalletChanges
+} from "./wallet.js";
 import {
   getBridgeNetworkOptions,
   getCurrentBridgeNetworkId,
@@ -39,6 +46,7 @@ const els = {
   themeModeIcon: document.getElementById("themeModeIcon"),
   account: document.getElementById("account"),
   walletNetwork: document.getElementById("walletNetwork"),
+  walletBalance: document.getElementById("walletBalance"),
   connectionStatus: document.getElementById("connectionStatus"),
   amount: document.getElementById("amount"),
   fee: document.getElementById("fee"),
@@ -99,9 +107,13 @@ let orderedCardIds = [];
 let touchGestureStart = null;
 let pointerGestureStart = null;
 let walletNetwork = null;
+let walletBalance = null;
 let actionStatusTickTimer = null;
 let actionStatusHideTimer = null;
 let backgroundStatusShowTimer = null;
+let unsubscribeWalletEvents = null;
+let walletChangeTimer = null;
+let pendingWalletProviderRefreshReason = null;
 
 const actionStatusState = {
   visible: false,
@@ -481,9 +493,33 @@ function formatWalletNetwork(networkId) {
   return labels[networkId] ?? networkId ?? "Unknown";
 }
 
+function formatWalletBalance(value) {
+  if (value === null || value === undefined || value === "") return "Unavailable";
+  return `${value} MINA`;
+}
+
+async function refreshWalletBalance() {
+  if (!account || !walletNetwork) {
+    walletBalance = null;
+    renderTopStatus();
+    return null;
+  }
+
+  try {
+    walletBalance = await getAccountBalance(account, walletNetwork);
+  } catch (error) {
+    walletBalance = null;
+    log("Wallet balance refresh error:", error?.message || error);
+  }
+
+  renderTopStatus();
+  return walletBalance;
+}
+
 async function refreshWalletNetwork() {
   if (!account) {
     walletNetwork = null;
+    walletBalance = null;
     renderTopStatus();
     return null;
   }
@@ -494,6 +530,7 @@ async function refreshWalletNetwork() {
     walletNetwork = null;
   }
 
+  await refreshWalletBalance();
   renderTopStatus();
   return walletNetwork;
 }
@@ -913,7 +950,10 @@ function estimateDepositLabel(deposit, isClaimableNow = false) {
 function renderTopStatus() {
   els.account.textContent = account || "Not connected";
   if (els.walletNetwork) {
-    els.walletNetwork.textContent = account ? formatWalletNetwork(walletNetwork) : "Unknown";
+    els.walletNetwork.textContent = walletNetwork ? formatWalletNetwork(walletNetwork) : "Unknown";
+  }
+  if (els.walletBalance) {
+    els.walletBalance.textContent = account ? formatWalletBalance(walletBalance) : "-";
   }
   els.connectionStatus.textContent = account ? "Wallet connected" : "Wallet disconnected";
   els.connectionStatus.classList.toggle("connected", Boolean(account));
@@ -1018,6 +1058,109 @@ function alignBridgeNetworkToWalletIfNeeded() {
     `Aligned bridge network to ${getCurrentBridgePreset().label} from wallet network ${formatWalletNetwork(walletNetwork)}.`
   );
   return true;
+}
+
+async function syncWalletSessionFromProvider(reason = "wallet provider change") {
+  const previousAccount = account;
+  const previousWalletNetwork = walletNetwork;
+  const shouldResumePolling = Boolean(pollTimer);
+
+  if (shouldResumePolling) {
+    stopPolling();
+  }
+
+  let nextAccount = null;
+  let nextWalletNetwork = null;
+
+  try {
+    nextAccount = await getConnectedAccount();
+  } catch {
+    nextAccount = null;
+  }
+
+  try {
+    nextWalletNetwork = await getCurrentNetwork();
+  } catch {
+    nextWalletNetwork = null;
+  }
+
+  account = nextAccount;
+  walletNetwork = nextWalletNetwork;
+
+  if (!account) {
+    walletBalance = null;
+    bridge = null;
+    bridgeNetworkGeneration += 1;
+    refreshGeneration += 1;
+    resetQueueState();
+    renderTopStatus();
+    log(`Wallet disconnected after ${reason}.`);
+    return;
+  }
+
+  await refreshWalletBalance();
+
+  const hasSessionChanged =
+    previousAccount !== account ||
+    previousWalletNetwork !== walletNetwork;
+
+  const didRealignBridgeNetwork = alignBridgeNetworkToWalletIfNeeded();
+
+  if (hasSessionChanged && !didRealignBridgeNetwork) {
+    bridge = null;
+    bridgeNetworkGeneration += 1;
+    refreshGeneration += 1;
+    resetQueueState();
+  }
+
+  if (hasSessionChanged) {
+    log(
+      `Wallet provider change detected (${reason}). account=${account} network=${formatWalletNetwork(walletNetwork)}`
+    );
+  }
+
+  await ensureBridgeInitialized({ generation: bridgeNetworkGeneration });
+  await refreshQueues({
+    generation: refreshGeneration,
+    networkGeneration: bridgeNetworkGeneration
+  });
+
+  if (shouldResumePolling) {
+    startPolling();
+  }
+}
+
+function scheduleWalletSessionSync(reason) {
+  if (actionInFlight) {
+    pendingWalletProviderRefreshReason = reason;
+    log(`Wallet change detected during active action (${reason}). UI refresh postponed until the action completes.`);
+    return;
+  }
+
+  if (walletChangeTimer) {
+    clearTimeout(walletChangeTimer);
+  }
+
+  walletChangeTimer = setTimeout(() => {
+    walletChangeTimer = null;
+    void syncWalletSessionFromProvider(reason).catch((error) => {
+      log("Wallet auto-refresh error:", error?.message || error);
+      console.error(error);
+    });
+  }, 180);
+}
+
+function setupWalletProviderSubscriptions() {
+  if (unsubscribeWalletEvents) return;
+
+  try {
+    unsubscribeWalletEvents = subscribeToWalletChanges({
+      onAccountsChanged: () => scheduleWalletSessionSync("accountsChanged"),
+      onNetworkChanged: () => scheduleWalletSessionSync("networkChanged")
+    });
+  } catch (error) {
+    log("Wallet event subscription unavailable:", error?.message || error);
+  }
 }
 
 function renderSummaryGrid(container, items) {
@@ -1644,7 +1787,14 @@ async function runBridgeAction(actionName, callback, statusConfig = {}) {
   } finally {
     actionInFlight = false;
     await refreshWalletNetwork();
-    if (shouldResumePolling) {
+    if (pendingWalletProviderRefreshReason) {
+      const deferredReason = pendingWalletProviderRefreshReason;
+      pendingWalletProviderRefreshReason = null;
+      await syncWalletSessionFromProvider(deferredReason).catch((error) => {
+        log("Deferred wallet auto-refresh error:", error?.message || error);
+        console.error(error);
+      });
+    } else if (shouldResumePolling) {
       startPolling();
     }
   }
@@ -2298,6 +2448,7 @@ window.addEventListener("resize", maybeAutoReduceActionStatus);
     populateBridgeNetworkSelector();
     applyThemeMode();
     initializeCardControls();
+    setupWalletProviderSubscriptions();
     renderAll();
 
     const existing = await getConnectedAccount();

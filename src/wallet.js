@@ -1,4 +1,13 @@
-import { Transaction } from "o1js";
+import { fetchAccount, Transaction } from "o1js";
+
+const MINA_DECIMALS = 1_000_000_000n;
+const NETWORK_GRAPHQL_ENDPOINTS = {
+  "mina:devnet": "https://gateway.mina.devnet.zeko.io",
+  "mina:testnet": "https://gateway.mina.devnet.zeko.io",
+  "mina:mainnet": "https://gateway.mina.mainnet.zeko.io/",
+  "zeko:testnet": "https://testnet.zeko.io/graphql",
+  "zeko:mainnet": "https://mainnet.zeko.io/graphql"
+};
 
 export function getMinaProvider() {
   if (typeof window === "undefined" || !window.mina) {
@@ -113,6 +122,31 @@ function getAcceptedNetworkIds(networkId) {
   return NETWORK_ALIASES[networkId] ?? [networkId];
 }
 
+function normalizeNetworkId(payload) {
+  if (!payload) return null;
+  if (typeof payload === "string") return payload;
+  return payload.networkID ?? payload.networkId ?? payload.chainId ?? null;
+}
+
+function normalizeAccountsPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.accounts)) return payload.accounts;
+  if (typeof payload === "string") return [payload];
+  return [];
+}
+
+function formatNanoBalanceToMinaString(value) {
+  const raw = typeof value === "bigint" ? value : BigInt(value?.toString?.() ?? value ?? 0);
+  const whole = raw / MINA_DECIMALS;
+  const fraction = raw % MINA_DECIMALS;
+
+  if (fraction === 0n) {
+    return whole.toString();
+  }
+
+  return `${whole}.${fraction.toString().padStart(9, "0").replace(/0+$/, "")}`;
+}
+
 function matchesNetwork(currentNetwork, requiredNetwork) {
   if (!currentNetwork || !requiredNetwork) return false;
   return getAcceptedNetworkIds(requiredNetwork).includes(currentNetwork);
@@ -190,6 +224,65 @@ export async function getConnectedAccount() {
     undefined
   ).catch(() => null);
   return accounts?.[0] ?? null;
+}
+
+export async function getAccountBalance(account, networkId) {
+  if (!account || !networkId) return null;
+
+  const graphqlEndpoint = NETWORK_GRAPHQL_ENDPOINTS[networkId];
+  if (!graphqlEndpoint) {
+    throw new Error(`Unsupported wallet network for balance lookup: ${networkId}`);
+  }
+
+  const result = await fetchAccount({ publicKey: account }, graphqlEndpoint);
+
+  if (result?.error) {
+    throw new Error(result.error.message ?? String(result.error));
+  }
+
+  const balance = result?.account?.balance;
+  if (!balance) {
+    return "0";
+  }
+
+  return formatNanoBalanceToMinaString(balance.toBigInt?.() ?? balance.toString?.() ?? balance);
+}
+
+function registerProviderListener(mina, eventName, listener) {
+  const on = getProviderMethod(mina, "on") ?? getProviderMethod(mina, "addListener");
+  if (!on) return () => {};
+
+  on(eventName, listener);
+
+  const off = getProviderMethod(mina, "off") ?? getProviderMethod(mina, "removeListener");
+  if (!off) return () => {};
+  return () => off(eventName, listener);
+}
+
+export function subscribeToWalletChanges({ onAccountsChanged, onNetworkChanged } = {}) {
+  const mina = getMinaProvider();
+  const unsubscribeFns = [];
+
+  if (typeof onAccountsChanged === "function") {
+    const accountsListener = (payload) => onAccountsChanged(normalizeAccountsPayload(payload));
+    unsubscribeFns.push(registerProviderListener(mina, "accountsChanged", accountsListener));
+  }
+
+  if (typeof onNetworkChanged === "function") {
+    const networkListener = (payload) => onNetworkChanged(normalizeNetworkId(payload));
+    unsubscribeFns.push(registerProviderListener(mina, "networkChanged", networkListener));
+    unsubscribeFns.push(registerProviderListener(mina, "chainChanged", networkListener));
+  }
+
+  return () => {
+    for (const unsubscribe of unsubscribeFns) {
+      try {
+        unsubscribe();
+      } catch {
+        // Ignore provider unsubscription failures.
+      }
+    }
+  };
 }
 
 function extractSignedTransactionPayload(result) {
