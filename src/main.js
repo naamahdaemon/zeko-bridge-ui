@@ -106,6 +106,7 @@ let themeMode = loadPreferences().theme === "dark" ? "dark" : "light";
 let orderedCardIds = [];
 let touchGestureStart = null;
 let pointerGestureStart = null;
+let actionStatusTouchStartY = null;
 let walletNetwork = null;
 let walletBalance = null;
 let actionStatusTickTimer = null;
@@ -2506,6 +2507,48 @@ document.addEventListener("click", async (event) => {
     log("Clipboard copy error:", error?.message || error);
   }
 });
+
+document.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!actionStatusState.owner || !actionStatusState.visible || event.touches.length !== 1) {
+      actionStatusTouchStartY = null;
+      return;
+    }
+
+    actionStatusTouchStartY = event.touches[0].clientY;
+  },
+  { passive: true }
+);
+
+document.addEventListener(
+  "touchmove",
+  (event) => {
+    if (
+      !actionStatusState.owner ||
+      !actionStatusState.visible ||
+      actionStatusTouchStartY === null ||
+      event.touches.length !== 1
+    ) {
+      return;
+    }
+
+    const deltaY = Math.abs(event.touches[0].clientY - actionStatusTouchStartY);
+    if (deltaY > 8) {
+      dismissActionStatus();
+      actionStatusTouchStartY = null;
+    }
+  },
+  { passive: true }
+);
+
+document.addEventListener(
+  "touchend",
+  () => {
+    actionStatusTouchStartY = null;
+  },
+  { passive: true }
+);
 
 document.addEventListener(
   "touchstart",
