@@ -734,6 +734,11 @@ function initializeCardControls() {
 
     const cardId = `card-${index + 1}`;
     card.dataset.cardId = cardId;
+
+    if (card.dataset.cardControls === "disabled") {
+      return;
+    }
+
     orderedCardIds.push(cardId);
 
     const actionWrap = document.createElement("div");
@@ -822,7 +827,90 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function renderHashValue(hash) {
+function getMinaExplorerBaseUrl(bridgeNetworkId) {
+  return bridgeNetworkId === "mainnet"
+    ? "https://minascan.io/mainnet/tx/"
+    : "https://minascan.io/devnet/tx/";
+}
+
+function getMinaAddressExplorerBaseUrl(bridgeNetworkId) {
+  return bridgeNetworkId === "mainnet"
+    ? "https://minascan.io/mainnet/account/"
+    : "https://minascan.io/devnet/account/";
+}
+
+function getZekoExplorerBaseUrl(bridgeNetworkId) {
+  return bridgeNetworkId === "mainnet"
+    ? "https://zekoscan.io/tx/"
+    : "https://zekoscan.io/testnet/tx/";
+}
+
+function getZekoAddressExplorerBaseUrl(bridgeNetworkId) {
+  return bridgeNetworkId === "mainnet"
+    ? "https://zekoscan.io/address/"
+    : "https://zekoscan.io/testnet/address/";
+}
+
+function getTransactionExplorerUrl(hash, { chain = null, bridgeNetworkId = null } = {}) {
+  const fullHash = safeText(hash);
+  if (fullHash === "-" || !chain) return null;
+
+  const effectiveBridgeNetworkId = bridgeNetworkId ?? getCurrentBridgeNetworkId();
+  const baseUrl =
+    chain === "mina"
+      ? getMinaExplorerBaseUrl(effectiveBridgeNetworkId)
+      : chain === "zeko"
+        ? getZekoExplorerBaseUrl(effectiveBridgeNetworkId)
+        : null;
+
+  return baseUrl ? `${baseUrl}${encodeURIComponent(fullHash)}` : null;
+}
+
+function getAddressExplorerUrl(address, { chain = null, bridgeNetworkId = null } = {}) {
+  const fullAddress = safeText(address);
+  if (fullAddress === "-" || !chain) return null;
+
+  const effectiveBridgeNetworkId = bridgeNetworkId ?? getCurrentBridgeNetworkId();
+  const baseUrl =
+    chain === "mina"
+      ? getMinaAddressExplorerBaseUrl(effectiveBridgeNetworkId)
+      : chain === "zeko"
+        ? getZekoAddressExplorerBaseUrl(effectiveBridgeNetworkId)
+        : null;
+
+  return baseUrl ? `${baseUrl}${encodeURIComponent(fullAddress)}` : null;
+}
+
+function inferHistoryTransactionChain(entry) {
+  switch (entry?.type) {
+    case "deposit-submit":
+    case "deposit-cancel-next":
+    case "withdraw-finalize-next":
+      return "mina";
+    case "withdraw-submit":
+    case "deposit-claim-next":
+      return "zeko";
+    default:
+      return null;
+  }
+}
+
+function inferChainFromWalletNetwork(networkId) {
+  if (typeof networkId !== "string") return null;
+  if (networkId.startsWith("mina:")) return "mina";
+  if (networkId.startsWith("zeko:")) return "zeko";
+  return null;
+}
+
+function inferBridgeNetworkFromWalletNetwork(networkId) {
+  if (networkId === "mina:mainnet" || networkId === "zeko:mainnet") return "mainnet";
+  if (networkId === "mina:devnet" || networkId === "mina:testnet" || networkId === "zeko:testnet") {
+    return "testnet";
+  }
+  return getCurrentBridgeNetworkId();
+}
+
+function renderHashValue(hash, options = {}) {
   const fullHash = safeText(hash);
   if (fullHash === "-") {
     return `<span class="hash-value">-</span>`;
@@ -831,10 +919,15 @@ function renderHashValue(hash) {
   const shortHash = truncateMiddle(fullHash, 10, 8);
   const escapedFullHash = escapeHtml(fullHash);
   const escapedShortHash = escapeHtml(shortHash);
+  const explorerUrl = getTransactionExplorerUrl(fullHash, options);
+  const hashContent = explorerUrl
+    ? `<a class="hash-link hash-value" href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer noopener">${escapedShortHash}</a>`
+    : `<code class="hash-value">${escapedShortHash}</code>`;
+  const rowTitle = explorerUrl ? `${escapedFullHash} - Open in explorer` : escapedFullHash;
 
   return `
-    <span class="hash-row" title="${escapedFullHash}">
-      <code class="hash-value">${escapedShortHash}</code>
+    <span class="hash-row" title="${rowTitle}">
+      ${hashContent}
       <button
         type="button"
         class="copy-chip"
@@ -846,6 +939,24 @@ function renderHashValue(hash) {
       </button>
     </span>
   `;
+}
+
+function renderAddressValue(address, options = {}) {
+  const fullAddress = safeText(address);
+  if (fullAddress === "-") {
+    return `<span class="address-value">-</span>`;
+  }
+
+  const shortAddress = options.shorten === false ? fullAddress : shortPk(fullAddress);
+  const escapedFullAddress = escapeHtml(fullAddress);
+  const escapedShortAddress = escapeHtml(shortAddress);
+  const explorerUrl = getAddressExplorerUrl(fullAddress, options);
+
+  if (!explorerUrl) {
+    return `<span class="address-value" title="${escapedFullAddress}">${escapedShortAddress}</span>`;
+  }
+
+  return `<a class="address-link address-value" href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer noopener" title="${escapedFullAddress}">${escapedShortAddress}</a>`;
 }
 
 function formatDateTime(value) {
@@ -976,7 +1087,12 @@ function estimateDepositLabel(deposit, isClaimableNow = false) {
 }
 
 function renderTopStatus() {
-  els.account.textContent = account || "Not connected";
+  els.account.innerHTML = account
+    ? renderAddressValue(account, {
+      chain: inferChainFromWalletNetwork(walletNetwork),
+      bridgeNetworkId: inferBridgeNetworkFromWalletNetwork(walletNetwork)
+    })
+    : "Not connected";
   if (els.walletNetwork) {
     els.walletNetwork.textContent = walletNetwork ? formatWalletNetwork(walletNetwork) : "Unknown";
   }
@@ -1330,10 +1446,10 @@ function renderQueueDepositCards() {
 
           <div class="queue-grid">
             <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
-            <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
-            <div><strong>Holder:</strong> ${shortPk(holder)}</div>
+              <div><strong>Recipient:</strong> ${renderAddressValue(recipient, { chain: "zeko", bridgeNetworkId: getCurrentBridgeNetworkId() })}</div>
+              <div><strong>Holder:</strong> ${renderAddressValue(holder, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() })}</div>
             <div><strong>Timeout:</strong> ${timeout}</div>
-              <div><strong>Hash:</strong> ${renderHashValue(d.hash)}</div>
+              <div><strong>Hash:</strong> ${renderHashValue(d.hash, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() })}</div>
             <div><strong>Timestamp:</strong> ${formatChainTimestamp(d.timestamp)}</div>
             <div><strong>Estimate:</strong> ${estimateDepositLabel(d, isClaimableNow)}</div>
           </div>
@@ -1405,8 +1521,8 @@ function renderWithdrawalQueue() {
 
           <div class="queue-grid">
             <div><strong>Amount:</strong> ${formatMinaFromNanoLike(amount)} MINA</div>
-            <div><strong>Recipient:</strong> ${shortPk(recipient)}</div>
-              <div><strong>Hash:</strong> ${renderHashValue(w.hash)}</div>
+              <div><strong>Recipient:</strong> ${renderAddressValue(recipient, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() })}</div>
+              <div><strong>Hash:</strong> ${renderHashValue(w.hash, { chain: "zeko", bridgeNetworkId: getCurrentBridgeNetworkId() })}</div>
             <div><strong>Timestamp:</strong> ${formatChainTimestamp(w.timestamp)}</div>
             <div><strong>Estimate:</strong> ${estimateWithdrawalLabel(w)}</div>
           </div>
@@ -1515,10 +1631,10 @@ function renderQueueDepositCardsUpdated() {
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
               ${renderQueueField("Amount", `${formatMinaFromNanoLike(amount)} MINA`)}
-              ${renderQueueField("Recipient", shortPk(recipient), { title: recipient })}
-              ${renderQueueField("Holder", shortPk(holder), { title: holder })}
+              ${renderQueueField("Recipient", renderAddressValue(recipient, { chain: "zeko", bridgeNetworkId: getCurrentBridgeNetworkId() }), { title: recipient })}
+              ${renderQueueField("Holder", renderAddressValue(holder, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() }), { title: holder })}
               ${renderQueueField("Timeout", formatDepositTimeout(timeout), { title: `Raw timeout: ${timeout}` })}
-              ${renderQueueField("Hash", renderHashValue(d.hash), { title: safeText(d.hash), extraClass: "queue-field--hash" })}
+              ${renderQueueField("Hash", renderHashValue(d.hash, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() }), { title: safeText(d.hash), extraClass: "queue-field--hash" })}
               ${renderQueueField("Timestamp", formatChainTimestamp(d.timestamp))}
               ${renderQueueField("Estimate", estimateDepositLabel(d, isClaimableNow), { title: estimateDepositLabel(d, isClaimableNow) })}
             </div>
@@ -1608,8 +1724,8 @@ function renderQueueWithdrawalCards() {
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
               ${renderQueueField("Amount", `${formatMinaFromNanoLike(amount)} MINA`)}
-              ${renderQueueField("Recipient", shortPk(recipient), { title: recipient })}
-              ${renderQueueField("Hash", renderHashValue(w.hash), { title: safeText(w.hash), extraClass: "queue-field--hash" })}
+              ${renderQueueField("Recipient", renderAddressValue(recipient, { chain: "mina", bridgeNetworkId: getCurrentBridgeNetworkId() }), { title: recipient })}
+              ${renderQueueField("Hash", renderHashValue(w.hash, { chain: "zeko", bridgeNetworkId: getCurrentBridgeNetworkId() }), { title: safeText(w.hash), extraClass: "queue-field--hash" })}
               ${renderQueueField("Timestamp", formatChainTimestamp(w.timestamp))}
               ${renderQueueField("Estimate", estimateWithdrawalLabel(w), { title: estimateWithdrawalLabel(w) })}
             </div>
@@ -1643,7 +1759,10 @@ function renderLocalHistory() {
           <div class="queue-title">${safeText(h.type)} • ${safeText(h.status)}</div>
             <div class="queue-grid local-history-grid">
               <div class="history-field"><strong>Time:</strong> ${safeText(h.time)}</div>
-              <div class="history-field"><strong>Hash:</strong> ${renderHashValue(h.hash)}</div>
+              <div class="history-field"><strong>Hash:</strong> ${renderHashValue(h.hash, {
+                chain: inferHistoryTransactionChain(h),
+                bridgeNetworkId: h.bridgeNetworkId ?? getCurrentBridgeNetworkId()
+              })}</div>
               <div class="history-field"><strong>Amount:</strong> ${safeText(h.amount)}</div>
               <div class="history-field"><strong>Fee:</strong> ${safeText(h.fee)}</div>
               <div class="history-field"><strong>Memo:</strong> ${safeText(h.memo)}</div>
@@ -1967,6 +2086,7 @@ els.deposit.addEventListener("click", async () => {
       appendHistory({
         type: "deposit-submit",
         status: "submitted",
+        bridgeNetworkId: getCurrentBridgeNetworkId(),
         hash,
         amount,
         fee,
@@ -1990,6 +2110,7 @@ els.deposit.addEventListener("click", async () => {
     appendHistory({
       type: "deposit-submit",
       status: "error",
+      bridgeNetworkId: getCurrentBridgeNetworkId(),
       hash: null,
       amount: els.amount.value,
       fee: els.fee.value,
@@ -2027,6 +2148,7 @@ els.withdraw.addEventListener("click", async () => {
       appendHistory({
         type: "withdraw-submit",
         status: "submitted",
+        bridgeNetworkId: getCurrentBridgeNetworkId(),
         hash,
         amount,
         fee,
@@ -2050,6 +2172,7 @@ els.withdraw.addEventListener("click", async () => {
     appendHistory({
       type: "withdraw-submit",
       status: "error",
+      bridgeNetworkId: getCurrentBridgeNetworkId(),
       hash: null,
       amount: els.amount.value,
       fee: els.fee.value,
@@ -2102,6 +2225,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
       appendHistory({
         type: "deposit-claim-next",
         status: "submitted",
+        bridgeNetworkId: getCurrentBridgeNetworkId(),
         hash,
         amount: formatMinaFromNanoLike(nextClaimable.amount.toString()),
         fee,
@@ -2126,6 +2250,7 @@ els.claimNextDeposit.addEventListener("click", async () => {
     appendHistory({
       type: "deposit-claim-next",
       status: "error",
+      bridgeNetworkId: getCurrentBridgeNetworkId(),
       hash: null,
       amount: null,
       fee: els.fee.value,
@@ -2190,6 +2315,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
       appendHistory({
         type: "deposit-cancel-next",
         status: "submitted",
+        bridgeNetworkId: getCurrentBridgeNetworkId(),
         hash,
         amount: formatMinaFromNanoLike(nextCancellable.amount.toString()),
         fee,
@@ -2214,6 +2340,7 @@ els.cancelNextDeposit.addEventListener("click", async () => {
     appendHistory({
       type: "deposit-cancel-next",
       status: "error",
+      bridgeNetworkId: getCurrentBridgeNetworkId(),
       hash: null,
       amount: null,
       fee: els.fee.value,
@@ -2278,6 +2405,7 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
       appendHistory({
         type: "withdraw-finalize-next",
         status: "submitted",
+        bridgeNetworkId: getCurrentBridgeNetworkId(),
         hash,
         amount: formatMinaFromNanoLike(nextFinalizable.amount.toString()),
         fee,
@@ -2302,6 +2430,7 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
     appendHistory({
       type: "withdraw-finalize-next",
       status: "error",
+      bridgeNetworkId: getCurrentBridgeNetworkId(),
       hash: null,
       amount: null,
       fee: els.fee.value,

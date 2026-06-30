@@ -107,10 +107,7 @@ body.force-desktop.mobile-desktop-scaled .app {
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: 1.3fr minmax(280px, 360px);
-  gap: 24px;
-  align-items: start;
+  display: block;
 }
 
 .hero-copy {
@@ -196,6 +193,37 @@ h2 {
   border-radius: 18px;
 }
 
+.wallet-panel {
+  margin-bottom: 18px;
+}
+
+.wallet-panel-status {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 18px;
+}
+
+.wallet-panel-action {
+  display: grid;
+  gap: 14px;
+  align-content: stretch;
+}
+
+.status-meta {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  min-width: 0;
+}
+
+.wallet-meta-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 250, 242, 0.7);
+  border: 1px solid rgba(140, 119, 91, 0.12);
+  min-width: 0;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -218,6 +246,43 @@ h2 {
   font-size: 0.98rem;
   font-weight: 700;
   word-break: break-word;
+}
+
+.address-value {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.address-link {
+  color: var(--primary-strong);
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(13, 110, 110, 0.28);
+}
+
+.address-link:hover,
+.address-link:focus-visible {
+  color: var(--primary);
+  border-bottom-color: currentColor;
+}
+
+.wallet-panel-status .primary-button {
+  align-self: end;
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 1120px) {
+  .wallet-panel-status {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-panel-action {
+    align-content: start;
+  }
 }
 
 .section-heading {
@@ -456,6 +521,16 @@ button:disabled {
   background: linear-gradient(180deg, rgba(37, 44, 54, 0.98), rgba(31, 36, 45, 0.98));
 }
 
+[data-theme="dark"] .wallet-meta-card {
+  background: rgba(37, 44, 54, 0.9);
+  border-color: rgba(88, 104, 123, 0.28);
+}
+
+[data-theme="dark"] .address-link {
+  color: #7eead7;
+  border-bottom-color: rgba(126, 234, 215, 0.35);
+}
+
 [data-theme="dark"] .info-callout {
   background: rgba(45, 212, 191, 0.1);
   border-color: rgba(45, 212, 191, 0.14);
@@ -476,6 +551,11 @@ button:disabled {
 
 [data-theme="dark"] .copy-chip {
   background: rgba(37, 44, 54, 0.95);
+}
+
+[data-theme="dark"] .hash-link {
+  color: #7eead7;
+  border-bottom-color: rgba(126, 234, 215, 0.35);
 }
 
 [data-theme="dark"] .card.is-fullscreen {
@@ -770,6 +850,18 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   padding: 2px 0;
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.92rem;
+}
+
+.hash-link {
+  color: var(--primary-strong);
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(13, 110, 110, 0.28);
+}
+
+.hash-link:hover,
+.hash-link:focus-visible {
+  color: var(--primary);
+  border-bottom-color: currentColor;
 }
 
 .copy-chip {
@@ -1115,6 +1207,12 @@ pre {
   body:not(.force-desktop) .hero-toolbar-main,
   body:not(.force-desktop) .hero-toolbar {
     flex-wrap: nowrap;
+  }
+
+  body:not(.force-desktop) .wallet-panel-status,
+  body.card-focus-mode .card.is-fullscreen .wallet-panel-status {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   body:not(.force-desktop) .action-indicator-label {

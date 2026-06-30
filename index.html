@@ -9,7 +9,7 @@
   </head>
   <body>
     <div class="app">
-      <header class="hero card">
+      <header class="hero card" data-card-controls="disabled">
         <div class="hero-copy">
           <div class="hero-topline">
             <span class="eyebrow">Mina <span class="muted-arrow">to</span> Zeko bridge</span>
@@ -39,24 +39,28 @@
             A clearer control panel to move funds, track bridge progress, and handle the next claim, cancel, or finalize step for your connected wallet.
           </p>
         </div>
+      </header>
 
-        <div class="hero-status">
-          <div class="status-pill" id="connectionStatus">Wallet disconnected</div>
-          <div class="status-meta">
+      <section class="card wallet-panel">
+        <div class="hero-status wallet-panel-status">
+          <div class="status-meta wallet-meta-card">
             <div class="meta-label">Connected network</div>
             <div id="walletNetwork" class="meta-value">Unknown</div>
           </div>
-          <div class="status-meta">
+          <div class="status-meta wallet-meta-card">
             <div class="meta-label">Connected account</div>
             <div id="account" class="meta-value">Not connected</div>
           </div>
-          <div class="status-meta">
+          <div class="status-meta wallet-meta-card">
             <div class="meta-label">Balance on current network</div>
             <div id="walletBalance" class="meta-value">-</div>
           </div>
-          <button id="connect" class="primary-button">Connect wallet</button>
+          <div class="wallet-panel-action">
+            <div class="status-pill" id="connectionStatus">Wallet disconnected</div>
+            <button id="connect" class="primary-button">Connect wallet</button>
+          </div>
         </div>
-      </header>
+      </section>
 
       <section class="grid two-up">
         <div class="card">
