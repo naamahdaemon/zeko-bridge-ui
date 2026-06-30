@@ -450,13 +450,7 @@ function maybeAutoReduceActionStatus() {
   if (!actionStatusState.owner || !actionStatusState.visible) return;
 
   const scrollTop = window.scrollY || window.pageYOffset || 0;
-  const viewportBottom = scrollTop + window.innerHeight;
-  const documentHeight = Math.max(
-    document.body.scrollHeight,
-    document.documentElement.scrollHeight
-  );
-
-  if (viewportBottom >= documentHeight - ACTION_STATUS_AUTO_REDUCE_BOTTOM_THRESHOLD_PX) {
+  if (scrollTop > 0) {
     dismissActionStatus();
   }
 }
