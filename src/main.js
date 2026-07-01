@@ -1013,6 +1013,22 @@ function renderQueueField(label, value, { title = null, extraClass = "" } = {}) 
   `;
 }
 
+function renderInlineQueueAction(action) {
+  if (!action) return "";
+
+  return `
+    <button
+      type="button"
+      class="queue-inline-action"
+      data-queue-action="${escapeHtml(action.key)}"
+      data-queue-index="${escapeHtml(action.index)}"
+      title="${escapeHtml(action.label)}"
+    >
+      ${escapeHtml(action.label)}
+    </button>
+  `;
+}
+
 function getBridgeDelayMs() {
   const slots = Number(bridge?.withdrawalDelay?.toString?.() ?? bridge?.withdrawalDelay ?? 0);
   if (!Number.isFinite(slots) || slots <= 0) return null;
@@ -1101,6 +1117,9 @@ function renderTopStatus() {
   if (els.bridgeNetwork) {
     els.bridgeNetwork.value = getCurrentBridgeNetworkId();
   }
+  els.claimNextDeposit?.classList.toggle("is-active-action", !els.claimNextDeposit.disabled);
+  els.cancelNextDeposit?.classList.toggle("is-active-action", !els.cancelNextDeposit.disabled);
+  els.finalizeNextWithdrawal?.classList.toggle("is-active-action", !els.finalizeNextWithdrawal.disabled);
 }
 
 function pickNextClaimableDeposit(state, caps = uiState.depositCapabilities) {
@@ -1603,11 +1622,16 @@ function renderQueueDepositCardsUpdated() {
         .filter(Boolean)
         .join("");
 
+      const inlineAction = isClaimableNow
+        ? { key: "claim-deposit", index: d.index, label: "Claim" }
+        : isCancellableNow
+          ? { key: "cancel-deposit", index: d.index, label: "Cancel" }
+          : null;
+
       return `
         <div class="${classes}">
-          <button
+          <div
             class="queue-toggle"
-            type="button"
             data-queue-type="deposit"
             data-queue-index="${d.index}"
             data-queue-done="${isDone}"
@@ -1619,9 +1643,14 @@ function renderQueueDepositCardsUpdated() {
             </span>
             <span class="queue-toggle-side">
               ${renderCurrentStatusBadge(currentStatus)}
-              <span class="queue-toggle-label">${isExpanded ? "Hide" : "Show"}</span>
+              ${renderInlineQueueAction(inlineAction)}
+              <button
+                class="queue-toggle-control"
+                type="button"
+                aria-expanded="${isExpanded}"
+              >${isExpanded ? "Hide" : "Show"}</button>
             </span>
-          </button>
+          </div>
 
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
@@ -1696,11 +1725,14 @@ function renderQueueWithdrawalCards() {
         .filter(Boolean)
         .join(" ");
 
+      const inlineAction = isFinalizableNow
+        ? { key: "finalize-withdrawal", index: w.index, label: "Finalize" }
+        : null;
+
       return `
         <div class="${classes}">
-          <button
+          <div
             class="queue-toggle"
-            type="button"
             data-queue-type="withdrawal"
             data-queue-index="${w.index}"
             data-queue-done="${isDone}"
@@ -1712,9 +1744,14 @@ function renderQueueWithdrawalCards() {
             </span>
             <span class="queue-toggle-side">
               ${renderCurrentStatusBadge(currentStatus)}
-              <span class="queue-toggle-label">${isExpanded ? "Hide" : "Show"}</span>
+              ${renderInlineQueueAction(inlineAction)}
+              <button
+                class="queue-toggle-control"
+                type="button"
+                aria-expanded="${isExpanded}"
+              >${isExpanded ? "Hide" : "Show"}</button>
             </span>
-          </button>
+          </div>
 
           <div class="queue-detail"${isExpanded ? "" : " hidden"}>
             <div class="queue-grid">
@@ -2450,6 +2487,29 @@ els.finalizeNextWithdrawal.addEventListener("click", async () => {
   }
 });
 
+document.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("[data-queue-action]");
+  if (!actionButton) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const action = actionButton.getAttribute("data-queue-action");
+  if (action === "claim-deposit") {
+    els.claimNextDeposit?.click();
+    return;
+  }
+
+  if (action === "cancel-deposit") {
+    els.cancelNextDeposit?.click();
+    return;
+  }
+
+  if (action === "finalize-withdrawal") {
+    els.finalizeNextWithdrawal?.click();
+  }
+});
+
 els.clearHistory.addEventListener("click", () => {
   clearHistory();
   log("Cleared local history");
@@ -2472,6 +2532,8 @@ els.actionStatusReduced?.addEventListener("click", () => {
 });
 
 els.depositQueue?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-queue-action]")) return;
+
   const button = event.target.closest("[data-queue-type='deposit']");
   if (!button) return;
 
@@ -2483,6 +2545,8 @@ els.depositQueue?.addEventListener("click", (event) => {
 });
 
 els.withdrawalQueue?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-queue-action]")) return;
+
   const button = event.target.closest("[data-queue-type='withdrawal']");
   if (!button) return;
 

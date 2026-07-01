@@ -355,6 +355,12 @@ button:disabled {
   border-color: transparent;
 }
 
+button.is-active-action:not(:disabled) {
+  border-color: rgba(15, 118, 110, 0.34);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12), 0 14px 28px rgba(15, 23, 42, 0.1);
+  animation: active-action-pulse 1.9s ease-in-out infinite;
+}
+
 .ghost-button {
   width: auto;
   min-width: 140px;
@@ -767,16 +773,57 @@ body.card-focus-mode .card:not(.is-fullscreen) {
 
 .queue-toggle-side {
   flex-shrink: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .queue-toggle .queue-title {
   margin-bottom: 0;
 }
 
-.queue-toggle-label {
+.queue-toggle-label,
+.queue-toggle-control {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.queue-toggle-control {
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.queue-toggle-control:hover {
+  transform: none;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.queue-inline-action {
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 250, 242, 0.95);
+  border-color: rgba(15, 118, 110, 0.3);
+  color: var(--primary-strong);
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 800;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
+}
+
+.queue-inline-action:hover {
+  background: rgba(255, 250, 242, 1);
+  border-color: rgba(15, 118, 110, 0.38);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
 }
 
 .queue-detail {
@@ -1095,6 +1142,17 @@ body.card-focus-mode .card:not(.is-fullscreen) {
   }
 }
 
+@keyframes active-action-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12), 0 14px 28px rgba(15, 23, 42, 0.1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.18), 0 18px 34px rgba(15, 23, 42, 0.12);
+  }
+}
+
 pre {
   white-space: pre-wrap;
   word-break: break-word;
@@ -1181,7 +1239,16 @@ pre {
   body:not(.force-desktop) .queue-toggle-side,
   body.card-focus-mode .card.is-fullscreen .queue-toggle-side {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  body:not(.force-desktop) .queue-toggle-side::-webkit-scrollbar,
+  body.card-focus-mode .card.is-fullscreen .queue-toggle-side::-webkit-scrollbar {
+    display: none;
   }
 
   body:not(.force-desktop) .card-action-button {
